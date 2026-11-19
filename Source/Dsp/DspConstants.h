@@ -46,6 +46,10 @@ struct GlobalParams
     float mix = 0.45f;           // 0..1
     float outputGainDb = 0.0f;   // -24..+12 dB
     float humanize = 0.20f;      // 0..1
+    float glideMs = 28.0f;       // 0..150 ms pitch transition glide
+    float naturalness = 0.35f;   // 0..1 formant follow + high-band vocal air
+    float deEssAmount = 0.35f;   // 0..1 wet harmony bus sibilance control
+    float spaceAmount = 0.18f;   // 0..1 wet harmony studio vocal space
 };
 
 struct TelemetrySnapshot

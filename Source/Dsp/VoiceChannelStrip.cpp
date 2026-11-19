@@ -11,13 +11,14 @@ void VoiceChannelStrip::prepare(double sampleRate, int voiceIndex)
     fs = std::max(8000.0, sampleRate);
     idx = voiceIndex;
 
-    const int maxDelaySamp = static_cast<int>(std::ceil(fs * 0.060)); // Up to 60 ms
+    const int maxDelaySamp = static_cast<int>(std::ceil(fs * 0.065)); // Up to 65 ms
     delayLine.prepare(maxDelaySamp);
 
     paramSmoothAlpha = static_cast<float>(1.0 - std::exp(-1.0 / (0.018 * fs)));
+    walkAlphaSample = static_cast<float>(1.0 - std::exp(-kTwoPi * 0.35 / fs));
+    walkAlphaBlock = static_cast<float>(1.0 - std::exp(-kTwoPi * 0.35 * 128.0 / fs));
 
-    // Desynchronized slow LFO rates & initial phases per voice
-    lfoRateHz = 0.31 + static_cast<double>(voiceIndex) * 0.13;
+    baseRateHz = 0.23 + static_cast<double>(voiceIndex) * 0.09;
     reset();
 }
 
@@ -27,8 +28,15 @@ void VoiceChannelStrip::reset() noexcept
     hpf.reset();
     lpf.reset();
 
-    lfoPhase = std::fmod(static_cast<double>(idx) * 1.37, kTwoPi);
-    lfoPhasePitch = std::fmod(static_cast<double>(idx) * 2.19 + 0.8, kTwoPi);
+    phaseA = std::fmod(static_cast<double>(idx) * 1.37, kTwoPi);
+    phaseB = std::fmod(static_cast<double>(idx) * 2.51 + 0.7, kTwoPi);
+    phasePitchA = std::fmod(static_cast<double>(idx) * 2.19 + 0.8, kTwoPi);
+    phasePitchB = std::fmod(static_cast<double>(idx) * 3.13 + 1.4, kTwoPi);
+
+    rngState = 0x9E3779B9u + static_cast<uint32_t>(idx * 2654435761u);
+    walkPitch = 0.0f;
+    walkDelay = 0.0f;
+    walkGain = 0.0f;
 
     smoothedGain = 0.0f;
     smoothedPan = 0.0f;
@@ -40,15 +48,29 @@ void VoiceChannelStrip::reset() noexcept
     lpf.setCutoff(smoothedLpfHz, fs);
 }
 
+float VoiceChannelStrip::nextRandomWalkSample(float& state, float alpha) noexcept
+{
+    rngState = rngState * 1664525u + 1013904223u;
+    const float white = (static_cast<float>(rngState >> 16) / 32768.0f) - 1.0f;
+    state += alpha * (white - state);
+    return std::clamp(state * 2.4f, -1.0f, 1.0f);
+}
+
 float VoiceChannelStrip::computeHumanizeCents(float humanizeAmount, int numSamples) noexcept
 {
     const float h = std::clamp(humanizeAmount, 0.0f, 1.0f);
     if (h <= 0.001f)
         return 0.0f;
 
-    const double phaseInc = kTwoPi * (lfoRateHz * 1.17) * static_cast<double>(numSamples) / fs;
-    lfoPhasePitch = std::fmod(lfoPhasePitch + phaseInc, kTwoPi);
-    return 6.0f * h * static_cast<float>(std::sin(lfoPhasePitch));
+    constexpr double kPhi = 1.61803398875;
+    const double dt = static_cast<double>(numSamples) / fs;
+    phasePitchA = std::fmod(phasePitchA + kTwoPi * (baseRateHz * 1.13) * dt, kTwoPi);
+    phasePitchB = std::fmod(phasePitchB + kTwoPi * (baseRateHz * 1.13 * kPhi) * dt, kTwoPi);
+
+    const float osc = 0.55f * static_cast<float>(std::sin(phasePitchA))
+                    + 0.45f * static_cast<float>(std::sin(phasePitchB));
+    const float rnd = nextRandomWalkSample(walkPitch, walkAlphaBlock);
+    return 7.0f * h * (0.65f * osc + 0.35f * rnd);
 }
 
 void VoiceChannelStrip::processAndAccumulate(const float* monoIn,
@@ -68,9 +90,11 @@ void VoiceChannelStrip::processAndAccumulate(const float* monoIn,
     const double targetHpf = std::clamp(static_cast<double>(params.hpfHz), 40.0, 1200.0);
     const double targetLpf = std::clamp(static_cast<double>(params.lpfHz), 1500.0, 19500.0);
 
-    const double lfoInc = kTwoPi * lfoRateHz / fs;
+    constexpr double kPhi = 1.61803398875;
+    const double incA = kTwoPi * baseRateHz / fs;
+    const double incB = kTwoPi * (baseRateHz * kPhi) / fs;
     const float minDelaySamples = 1.0f;
-    const float maxDelaySamples = static_cast<float>(fs * 0.050);
+    const float maxDelaySamples = static_cast<float>(fs * 0.055);
 
     double rmsAcc = 0.0;
 
@@ -81,18 +105,24 @@ void VoiceChannelStrip::processAndAccumulate(const float* monoIn,
         smoothedHpfHz += static_cast<double>(paramSmoothAlpha) * (targetHpf - smoothedHpfHz);
         smoothedLpfHz += static_cast<double>(paramSmoothAlpha) * (targetLpf - smoothedLpfHz);
 
-        // Update filter coeffs periodically (every 8 samples) for smooth sweeps & low CPU
         if ((i & 7) == 0)
         {
             hpf.setCutoff(smoothedHpfHz, fs);
             lpf.setCutoff(smoothedLpfHz, fs);
         }
 
-        lfoPhase += lfoInc;
-        if (lfoPhase >= kTwoPi)
-            lfoPhase -= kTwoPi;
+        phaseA += incA;
+        if (phaseA >= kTwoPi)
+            phaseA -= kTwoPi;
+        phaseB += incB;
+        if (phaseB >= kTwoPi)
+            phaseB -= kTwoPi;
 
-        const float modMs = h * 3.0f * (0.5f + 0.5f * static_cast<float>(std::sin(lfoPhase)));
+        const float osc = 0.5f + 0.28f * static_cast<float>(std::sin(phaseA))
+                               + 0.22f * static_cast<float>(std::sin(phaseB));
+        const float rndDelay = 0.5f + 0.5f * nextRandomWalkSample(walkDelay, walkAlphaSample);
+        const float modMs = h * 4.5f * (0.65f * osc + 0.35f * rndDelay);
+
         const float targetDelaySamples = std::clamp(
             minDelaySamples + (baseDelayMs + modMs) * static_cast<float>(fs * 0.001),
             minDelaySamples,
@@ -111,7 +141,9 @@ void VoiceChannelStrip::processAndAccumulate(const float* monoIn,
         double dummyHp = 0.0;
         lpf.processSample(hpOut, lpOut, dummyHp);
 
-        const float filtered = sanitizeSample(static_cast<float>(lpOut) * smoothedGain);
+        // Subtle organic breath (+/- 10% gain drift when humanize > 0)
+        const float breathGain = 1.0f + 0.10f * h * nextRandomWalkSample(walkGain, walkAlphaSample);
+        const float filtered = sanitizeSample(static_cast<float>(lpOut) * smoothedGain * breathGain);
         rmsAcc += static_cast<double>(filtered) * static_cast<double>(filtered);
 
         // Equal-power stereo pan: [-1..+1] -> [0..pi/2]

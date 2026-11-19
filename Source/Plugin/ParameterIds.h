@@ -13,6 +13,10 @@ inline constexpr const char* engineMode  = "engine_mode";
 inline constexpr const char* mix         = "mix";
 inline constexpr const char* outputGain  = "output_gain";
 inline constexpr const char* humanize    = "humanize";
+inline constexpr const char* glideMs     = "glide_ms";
+inline constexpr const char* naturalness = "natural";
+inline constexpr const char* deEssAmount = "deess";
+inline constexpr const char* spaceAmount = "space";
 
 inline constexpr const char* vEnabled  = "enabled";
 inline constexpr const char* vMute     = "mute";

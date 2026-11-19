@@ -9,12 +9,14 @@ HarmonizerVEditor::HarmonizerVEditor(HarmonizerVProcessor& p)
       proc(p),
       headerBar(p),
       harmonyStage(p),
+      harmonyFeelBar(p),
       voiceInspector(p)
 {
     setLookAndFeel(&lookAndFeel);
 
     addAndMakeVisible(headerBar);
     addAndMakeVisible(harmonyStage);
+    addAndMakeVisible(harmonyFeelBar);
     addAndMakeVisible(voiceInspector);
 
     harmonyStage.onVoiceSelected = [this](int voiceIdx)
@@ -23,8 +25,8 @@ HarmonizerVEditor::HarmonizerVEditor(HarmonizerVProcessor& p)
     };
 
     setResizable(true, true);
-    setResizeLimits(760, 480, 1400, 860);
-    setSize(920, 560);
+    setResizeLimits(760, 510, 1400, 900);
+    setSize(920, 598);
 
     startTimerHz(30);
 }
@@ -40,6 +42,7 @@ void HarmonizerVEditor::timerCallback()
     const auto snap = proc.getTelemetry();
     headerBar.updateTelemetry(snap);
     harmonyStage.updateTelemetry(snap);
+    harmonyFeelBar.updateModeAccent(snap.activeMode);
 }
 
 void HarmonizerVEditor::paint(juce::Graphics& g)
@@ -51,9 +54,11 @@ void HarmonizerVEditor::resized()
 {
     auto r = getLocalBounds().reduced(12);
     headerBar.setBounds(r.removeFromTop(62));
-    r.removeFromTop(10);
+    r.removeFromTop(8);
     voiceInspector.setBounds(r.removeFromBottom(116));
-    r.removeFromBottom(10);
+    r.removeFromBottom(8);
+    harmonyFeelBar.setBounds(r.removeFromBottom(36));
+    r.removeFromBottom(8);
     harmonyStage.setBounds(r);
 }
 

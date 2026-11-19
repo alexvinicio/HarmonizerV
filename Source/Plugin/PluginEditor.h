@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Plugin/PluginProcessor.h"
+#include "Ui/HarmonyFeelBar.h"
 #include "Ui/HarmonyStage.h"
 #include "Ui/HeaderBar.h"
 #include "Ui/ModernLookAndFeel.h"
@@ -29,6 +30,7 @@ private:
 
     ui::HeaderBar headerBar;
     ui::HarmonyStage harmonyStage;
+    ui::HarmonyFeelBar harmonyFeelBar;
     ui::VoiceInspector voiceInspector;
     juce::TooltipWindow tooltipWindow{ this, 600 };
 

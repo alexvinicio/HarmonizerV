@@ -11,6 +11,7 @@ void PitchTracker::prepare(double sampleRate)
     fs = std::max(8000.0, sampleRate);
     windowSize = (fs > 52000.0) ? 2048 : 1024;
     hopSize = (fs > 52000.0) ? 256 : 128;
+    holdHops = std::max(2, static_cast<int>(std::llround(0.020 * fs / hopSize)));
 
     minLag = std::max(8, static_cast<int>(std::floor(fs / kMaxVocalHz)));
     maxLag = std::min(windowSize - 64, static_cast<int>(std::ceil(fs / kMinVocalHz)));
@@ -50,8 +51,11 @@ void PitchTracker::reset() noexcept
     medianCount = 0;
     medianWriteIdx = 0;
     unvoicedFrames = 0;
+    voicedState = false;
+    holdCounter = 0;
 
     currentEstimate = PitchEstimate{};
+    instantValidHz = 220.0f;
     smoothedValidHz = 220.0f;
 }
 
@@ -107,8 +111,11 @@ void PitchTracker::analyzeWindow() noexcept
         ++unvoicedFrames;
         if (unvoicedFrames > 3)
             medianCount = 0;
+        voicedState = false;
+        holdCounter = 0;
         currentEstimate.isVoiced = false;
         currentEstimate.clarity = 0.0f;
+        currentEstimate.voicingConfidence = 0.0f;
         return;
     }
 
@@ -179,12 +186,27 @@ void PitchTracker::analyzeWindow() noexcept
     for (int i = 0; i < numKeyMax; ++i)
         highestMax = std::max(highestMax, keyMaxima[static_cast<size_t>(i)].val);
 
-    if (numKeyMax == 0 || highestMax < 0.55f)
+    constexpr float kVoicedOnThreshold = 0.60f;
+    constexpr float kVoicedOffThreshold = 0.40f;
+    const float activeThreshold = voicedState ? kVoicedOffThreshold : kVoicedOnThreshold;
+
+    if (numKeyMax == 0 || highestMax < activeThreshold)
     {
+        if (voicedState && holdCounter > 0)
+        {
+            --holdCounter;
+            currentEstimate.clarity = highestMax;
+            currentEstimate.voicingConfidence = std::clamp((highestMax - 0.35f) / 0.40f, 0.15f, 1.0f);
+            currentEstimate.isVoiced = true;
+            return;
+        }
+
         ++unvoicedFrames;
         if (unvoicedFrames > 3)
             medianCount = 0;
+        voicedState = false;
         currentEstimate.clarity = highestMax;
+        currentEstimate.voicingConfidence = 0.0f;
         currentEstimate.isVoiced = false;
         return;
     }
@@ -221,13 +243,24 @@ void PitchTracker::analyzeWindow() noexcept
     const float rawHz = static_cast<float>(fs / std::max(1.0, refinedLag));
     if (rawHz < kMinVocalHz || rawHz > kMaxVocalHz)
     {
+        if (voicedState && holdCounter > 0)
+        {
+            --holdCounter;
+            currentEstimate.isVoiced = true;
+            return;
+        }
+
         ++unvoicedFrames;
+        voicedState = false;
         currentEstimate.isVoiced = false;
         currentEstimate.clarity = chosenClarity;
+        currentEstimate.voicingConfidence = 0.0f;
         return;
     }
 
     unvoicedFrames = 0;
+    voicedState = true;
+    holdCounter = holdHops;
 
     // 3-frame median filter
     medianRing[static_cast<size_t>(medianWriteIdx)] = rawHz;
@@ -250,9 +283,11 @@ void PitchTracker::analyzeWindow() noexcept
     currentEstimate.frequencyHz = filteredHz;
     currentEstimate.midiNote = hzToMidi(filteredHz);
     currentEstimate.clarity = chosenClarity;
+    currentEstimate.voicingConfidence = std::clamp((chosenClarity - 0.35f) / 0.40f, 0.0f, 1.0f);
     currentEstimate.isVoiced = true;
 
-    smoothedValidHz = smoothedValidHz * 0.65f + filteredHz * 0.35f;
+    instantValidHz = filteredHz;
+    smoothedValidHz = smoothedValidHz * 0.80f + filteredHz * 0.20f;
 }
 
 } // namespace harmonizer::dsp

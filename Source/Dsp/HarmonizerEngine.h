@@ -2,6 +2,7 @@
 
 #include "Dsp/DelayLine.h"
 #include "Dsp/DspConstants.h"
+#include "Dsp/HarmonyBusFx.h"
 #include "Dsp/PitchMarkDetector.h"
 #include "Dsp/PitchTracker.h"
 #include "Dsp/ScaleHarmonizer.h"
@@ -67,6 +68,7 @@ private:
     std::array<SpectralVoice, kMaxVoices> studioVoices;
     std::array<VoiceChannelStrip, kMaxVoices> channelStrips;
     std::array<int, kMaxVoices> voiceTailRemaining{};
+    HarmonyBusFx harmonyBusFx;
 
     DelayLine dryDelayL;
     DelayLine dryDelayR;

@@ -32,7 +32,7 @@ std::vector<float> makeRichVocalWave(double f0Hz, double fs, int numSamples)
     return out;
 }
 
-std::vector<float> runTdPsola(const std::vector<float>& input, double fs, float shiftSt, float formantSt, int& outLatency)
+std::vector<float> runTdPsola(const std::vector<float>& input, double fs, float shiftSt, float formantSt, int& outLatency, float naturalness = 0.35f)
 {
     harmonizer::dsp::PitchTracker tracker;
     harmonizer::dsp::PitchMarkDetector marks;
@@ -40,7 +40,7 @@ std::vector<float> runTdPsola(const std::vector<float>& input, double fs, float 
 
     tracker.prepare(fs);
     marks.prepare(fs);
-    voice.prepare(fs);
+    voice.prepare(fs, 0);
     outLatency = voice.getLatencySamples();
 
     std::vector<float> output(input.size(), 0.0f);
@@ -48,10 +48,10 @@ std::vector<float> runTdPsola(const std::vector<float>& input, double fs, float 
     {
         tracker.pushSample(input[i]);
         const auto est = tracker.getEstimate();
-        const float f0 = tracker.getSmoothedValidHz();
+        const float f0 = tracker.getInstantHz();
         const int64_t pos = marks.getWritePos();
         marks.pushSample(input[i], f0, est.isVoiced);
-        output[i] = voice.processSample(marks, pos, f0, est.isVoiced, shiftSt, formantSt);
+        output[i] = voice.processSample(marks, pos, f0, est.voicingConfidence, shiftSt, formantSt, 24.0f, naturalness);
     }
     return output;
 }
@@ -172,7 +172,33 @@ TEST_CASE("TdPsolaVoice handles unvoiced noise cleanly without NaNs or clipping"
     }
 
     int lat = 0;
-    const auto out = runTdPsola(noise, fs, +7.0f, +2.0f, lat);
+    const auto out = runTdPsola(noise, fs, +7.0f, +2.0f, lat, 0.5f);
+    for (float s : out)
+    {
+        REQUIRE(std::isfinite(s));
+        REQUIRE(std::abs(s) < 2.0f);
+    }
+}
+
+TEST_CASE("TdPsolaVoice band-split preserves stability with vibrato and breath", "[TdPsolaVoice]")
+{
+    const double fs = 48000.0;
+    const int numSamples = 24000;
+    std::vector<float> vocal(static_cast<size_t>(numSamples), 0.0f);
+    uint32_t rng = 0x11223344u;
+    double phase = 0.0;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const double t = static_cast<double>(i) / fs;
+        const double f0 = 220.0 * (1.0 + 0.015 * std::sin(harmonizer::dsp::kTwoPi * 5.2 * t));
+        phase += harmonizer::dsp::kTwoPi * f0 / fs;
+        rng = rng * 1664525u + 1013904223u;
+        const float breath = (static_cast<float>(rng & 0xFFFFu) / 32768.0f - 1.0f) * 0.02f;
+        vocal[static_cast<size_t>(i)] = static_cast<float>(0.35 * std::sin(phase) + 0.18 * std::sin(2.0 * phase) + 0.08 * std::sin(3.0 * phase)) + breath;
+    }
+
+    int lat = 0;
+    const auto out = runTdPsola(vocal, fs, +4.0f, 0.0f, lat, 0.65f);
     for (float s : out)
     {
         REQUIRE(std::isfinite(s));

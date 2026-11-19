@@ -32,7 +32,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.1; }
+    double getTailLengthSeconds() const override { return 0.6; }
 
     int getNumPrograms() override;
     int getCurrentProgram() override;
@@ -80,6 +80,10 @@ private:
     std::atomic<float>* mixParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
     std::atomic<float>* humanizeParam = nullptr;
+    std::atomic<float>* glideParam = nullptr;
+    std::atomic<float>* naturalParam = nullptr;
+    std::atomic<float>* deEssParam = nullptr;
+    std::atomic<float>* spaceParam = nullptr;
 
     std::array<VoiceAtomics, dsp::kExposedVoicesV1> voiceAtomics{};
     std::atomic<double> currentSampleRate{ 48000.0 };

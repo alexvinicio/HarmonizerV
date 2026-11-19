@@ -3,6 +3,8 @@
 #include "Dsp/DelayLine.h"
 #include "Dsp/DspConstants.h"
 
+#include <cstdint>
+
 namespace harmonizer::dsp
 {
 
@@ -12,7 +14,7 @@ public:
     void prepare(double sampleRate, int voiceIndex);
     void reset() noexcept;
 
-    // Advances the per-voice humanize LFO and returns micro-pitch modulation in cents (+/- 6ct max)
+    // Advances organic non-periodic drift and returns micro-pitch modulation in cents (+/- 7ct max)
     float computeHumanizeCents(float humanizeAmount, int numSamples) noexcept;
 
     void processAndAccumulate(const float* monoIn,
@@ -30,7 +32,7 @@ private:
         double ic1eq = 0.0;
         double ic2eq = 0.0;
         double g = 0.1;
-        double k = std::sqrt(2.0);
+        double k = 1.41421356237;
         double a1 = 0.0, a2 = 0.0, a3 = 0.0;
 
         void reset() noexcept { ic1eq = ic2eq = 0.0; }
@@ -57,6 +59,8 @@ private:
         }
     };
 
+    float nextRandomWalkSample(float& state, float alpha) noexcept;
+
     double fs = 48000.0;
     int idx = 0;
 
@@ -64,13 +68,23 @@ private:
     SvfFilter hpf;
     SvfFilter lpf;
 
-    double lfoPhase = 0.0;
-    double lfoRateHz = 0.35;
-    double lfoPhasePitch = 0.0;
+    // Dual golden-ratio incommensurate phases + organic random walk state
+    double phaseA = 0.0;
+    double phaseB = 0.0;
+    double phasePitchA = 0.0;
+    double phasePitchB = 0.0;
+    double baseRateHz = 0.29;
+
+    uint32_t rngState = 0x12345678u;
+    float walkPitch = 0.0f;
+    float walkDelay = 0.0f;
+    float walkGain = 0.0f;
+    float walkAlphaBlock = 0.01f;
+    float walkAlphaSample = 0.0001f;
 
     float smoothedGain = 0.0f;
     float smoothedPan = 0.0f;
-    float smoothedDelaySamples = 0.0f;
+    float smoothedDelaySamples = 1.0f;
     double smoothedHpfHz = 80.0;
     double smoothedLpfHz = 16000.0;
     float paramSmoothAlpha = 0.01f;

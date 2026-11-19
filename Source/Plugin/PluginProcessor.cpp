@@ -42,6 +42,10 @@ HarmonizerVProcessor::HarmonizerVProcessor()
     mixParam        = apvts.getRawParameterValue(params::mix);
     outputGainParam = apvts.getRawParameterValue(params::outputGain);
     humanizeParam   = apvts.getRawParameterValue(params::humanize);
+    glideParam      = apvts.getRawParameterValue(params::glideMs);
+    naturalParam    = apvts.getRawParameterValue(params::naturalness);
+    deEssParam      = apvts.getRawParameterValue(params::deEssAmount);
+    spaceParam      = apvts.getRawParameterValue(params::spaceAmount);
 
     for (int v = 0; v < dsp::kExposedVoicesV1; ++v)
     {
@@ -97,6 +101,26 @@ juce::AudioProcessorValueTreeState::ParameterLayout HarmonizerVProcessor::create
     p.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ params::humanize, 1 }, "Humanize",
         juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 20.0f,
+        juce::AudioParameterFloatAttributes().withLabel("%")));
+
+    p.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ params::glideMs, 1 }, "Glide",
+        juce::NormalisableRange<float>(0.0f, 150.0f, 0.5f, 0.5f), 28.0f,
+        juce::AudioParameterFloatAttributes().withLabel("ms")));
+
+    p.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ params::naturalness, 1 }, "Natural",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 0.5f), 35.0f,
+        juce::AudioParameterFloatAttributes().withLabel("%")));
+
+    p.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ params::deEssAmount, 1 }, "De-Ess",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 0.5f), 35.0f,
+        juce::AudioParameterFloatAttributes().withLabel("%")));
+
+    p.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ params::spaceAmount, 1 }, "Space",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 0.5f), 18.0f,
         juce::AudioParameterFloatAttributes().withLabel("%")));
 
     for (int v = 0; v < dsp::kExposedVoicesV1; ++v)
@@ -221,6 +245,10 @@ void HarmonizerVProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     gp.mix          = mixParam->load(std::memory_order_relaxed) * 0.01f;
     gp.outputGainDb = outputGainParam->load(std::memory_order_relaxed);
     gp.humanize     = humanizeParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.glideMs      = glideParam->load(std::memory_order_relaxed);
+    gp.naturalness  = naturalParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.deEssAmount  = deEssParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.spaceAmount  = spaceParam->load(std::memory_order_relaxed) * 0.01f;
 
     std::array<dsp::VoiceParams, dsp::kMaxVoices> vp{};
     for (int v = 0; v < dsp::kExposedVoicesV1; ++v)

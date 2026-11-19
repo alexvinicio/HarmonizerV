@@ -24,13 +24,17 @@ struct FactoryPresetSpec
     const char* name;
     float mixPct;
     float humanizePct;
+    float glideMs;
+    float naturalPct;
+    float deEssPct;
+    float spacePct;
     bool forceLive;
     std::array<VoicePresetSpec, dsp::kExposedVoicesV1> voices;
 };
 
 constexpr std::array<FactoryPresetSpec, 7> kFactoryPresets = {{
     {
-        "Natural 3rd & 5th", 40.0f, 20.0f, false,
+        "Natural 3rd & 5th", 40.0f, 20.0f, 28.0f, 35.0f, 35.0f, 18.0f, false,
         {{
             { true,  +2,  0.0f,  0.0f,  4.0f, 110.0f, 14000.0f, -35.0f, -5.0f },
             { true,  +4,  0.0f,  0.0f,  9.0f, 130.0f, 13500.0f, +35.0f, -6.0f },
@@ -39,7 +43,7 @@ constexpr std::array<FactoryPresetSpec, 7> kFactoryPresets = {{
         }}
     },
     {
-        "Pop Choir (4V)", 50.0f, 28.0f, false,
+        "Pop Choir (4V)", 50.0f, 28.0f, 30.0f, 40.0f, 40.0f, 24.0f, false,
         {{
             { true,  -2, -4.0f, -1.0f,  5.0f, 110.0f, 13000.0f, -50.0f, -6.0f },
             { true,  +2, +4.0f, +0.5f,  8.0f, 130.0f, 14000.0f, +50.0f, -5.0f },
@@ -48,7 +52,7 @@ constexpr std::array<FactoryPresetSpec, 7> kFactoryPresets = {{
         }}
     },
     {
-        "Wide Octave Thickener", 42.0f, 22.0f, false,
+        "Wide Octave Thickener", 42.0f, 22.0f, 24.0f, 35.0f, 35.0f, 16.0f, false,
         {{
             { true,  -7,  0.0f, -2.0f,  2.0f,  80.0f,  9500.0f,   0.0f, -5.5f },
             { true,  +7, -6.0f, +1.5f, 10.0f, 240.0f, 16000.0f, -65.0f, -8.5f },
@@ -57,7 +61,7 @@ constexpr std::array<FactoryPresetSpec, 7> kFactoryPresets = {{
         }}
     },
     {
-        "Gospel Stack", 55.0f, 30.0f, false,
+        "Gospel Stack", 55.0f, 30.0f, 32.0f, 45.0f, 42.0f, 28.0f, false,
         {{
             { true,  -4, -3.0f, -1.5f,  4.0f,  95.0f, 12000.0f, -40.0f, -5.0f },
             { true,  +2, +3.0f,  0.0f,  9.0f, 130.0f, 13500.0f, +40.0f, -4.5f },
@@ -66,7 +70,7 @@ constexpr std::array<FactoryPresetSpec, 7> kFactoryPresets = {{
         }}
     },
     {
-        "Dark Baritone Shadow", 38.0f, 15.0f, false,
+        "Dark Baritone Shadow", 38.0f, 15.0f, 25.0f, 25.0f, 25.0f, 14.0f, false,
         {{
             { true,  -7, -2.0f, -4.0f,  3.0f,  75.0f,  6000.0f, -25.0f, -4.5f },
             { true,  -4, +2.0f, -3.0f, 11.0f,  85.0f,  6500.0f, +25.0f, -6.5f },
@@ -75,7 +79,7 @@ constexpr std::array<FactoryPresetSpec, 7> kFactoryPresets = {{
         }}
     },
     {
-        "Angelic Air", 46.0f, 26.0f, false,
+        "Angelic Air", 46.0f, 26.0f, 34.0f, 55.0f, 45.0f, 32.0f, false,
         {{
             { true,  +4, -4.0f, +3.0f, 10.0f, 300.0f, 17500.0f, -55.0f, -7.0f },
             { true,  +7, +4.0f, +5.0f, 16.0f, 400.0f, 18000.0f, +55.0f, -7.5f },
@@ -84,7 +88,7 @@ constexpr std::array<FactoryPresetSpec, 7> kFactoryPresets = {{
         }}
     },
     {
-        "Live Doubler", 35.0f, 35.0f, true,
+        "Live Doubler", 35.0f, 35.0f, 15.0f, 40.0f, 30.0f, 12.0f, true,
         {{
             { true,   0, -12.0f, -0.5f, 11.0f, 120.0f, 13000.0f, -70.0f, -4.5f },
             { true,   0, +12.0f, +0.5f, 17.0f, 120.0f, 13000.0f, +70.0f, -4.5f },
@@ -144,6 +148,10 @@ void PresetManager::applyFactoryPreset(int index)
 
     setParamValue(params::mix, spec.mixPct);
     setParamValue(params::humanize, spec.humanizePct);
+    setParamValue(params::glideMs, spec.glideMs);
+    setParamValue(params::naturalness, spec.naturalPct);
+    setParamValue(params::deEssAmount, spec.deEssPct);
+    setParamValue(params::spaceAmount, spec.spacePct);
     if (spec.forceLive)
         setParamValue(params::engineMode, 0.0f);
 

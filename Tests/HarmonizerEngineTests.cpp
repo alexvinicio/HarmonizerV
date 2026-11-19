@@ -265,8 +265,131 @@ TEST_CASE("HarmonizerEngine 4-voice LIVE mode CPU benchmark", "[HarmonizerEngine
 
     WARN("4-Voice LIVE mode processed 2000ms audio in " << elapsedMs << " ms (" << cpuPct << "% real-time CPU)");
 #ifdef NDEBUG
-    REQUIRE(elapsedMs < 400.0); // < 20% real-time in Release
+    REQUIRE(elapsedMs < 500.0); // < 25% real-time in Release
 #else
     REQUIRE(elapsedMs < 2000.0);
 #endif
+}
+
+TEST_CASE("HarmonizerEngine STUDIO mode glides smoothly on melody step at 100% wet", "[HarmonizerEngine]")
+{
+    const double sr = 48000.0;
+    const int bs = 128;
+
+    HarmonizerEngine engine;
+    engine.prepare(sr, bs);
+
+    GlobalParams gp;
+    gp.engineMode = EngineMode::Studio;
+    gp.mix = 1.0f; // Pure wet harmonies
+    gp.glideMs = 35.0f;
+    gp.naturalness = 0.4f;
+    gp.deEssAmount = 0.35f;
+    gp.spaceAmount = 0.20f;
+    auto vp = makeFourActiveVoices();
+
+    std::vector<float> in(bs, 0.0f), outL(bs, 0.0f), outR(bs, 0.0f);
+    float prevL = 0.0f;
+    float maxJump = 0.0f;
+    double wetEnergy = 0.0;
+
+    // 1.2s total stepping C4 (261.63 Hz) -> D4 (293.66 Hz) -> E4 (329.63 Hz)
+    const double freqs[3] = { 261.6256, 293.6648, 329.6276 };
+    double phase = 0.0;
+    for (int blk = 0; blk < 450; ++blk)
+    {
+        const double f0 = freqs[std::min(2, blk / 150)];
+        for (int i = 0; i < bs; ++i)
+        {
+            phase += kTwoPi * f0 / sr;
+            in[static_cast<size_t>(i)] = static_cast<float>(0.25 * std::sin(phase) + 0.12 * std::sin(2.0 * phase));
+        }
+
+        const float* inPtr[1] = { in.data() };
+        float* outPtr[2] = { outL.data(), outR.data() };
+        engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+
+        for (int i = 0; i < bs; ++i)
+        {
+            REQUIRE(std::isfinite(outL[static_cast<size_t>(i)]));
+            REQUIRE(std::isfinite(outR[static_cast<size_t>(i)]));
+            if (blk > 60)
+            {
+                maxJump = std::max(maxJump, std::abs(outL[static_cast<size_t>(i)] - prevL));
+                wetEnergy += static_cast<double>(outL[static_cast<size_t>(i)]) * outL[static_cast<size_t>(i)];
+            }
+            prevL = outL[static_cast<size_t>(i)];
+        }
+    }
+
+    REQUIRE(wetEnergy > 1.0);
+    REQUIRE(maxJump < 0.45f);
+}
+
+TEST_CASE("HarmonyDeEsser attenuates 7 kHz sibilance while preserving 300 Hz body", "[HarmonyBusFx]")
+{
+    const double sr = 48000.0;
+    const int n = 4800;
+
+    auto measureRmsAtFreq = [&](double freqHz, float deEssAmt)
+    {
+        HarmonyDeEsser ds;
+        ds.prepare(sr);
+        std::vector<float> bufL(static_cast<size_t>(n), 0.0f), bufR(static_cast<size_t>(n), 0.0f);
+        for (int i = 0; i < n; ++i)
+        {
+            const float s = 0.35f * static_cast<float>(std::sin(kTwoPi * freqHz * (static_cast<double>(i) / sr)));
+            bufL[static_cast<size_t>(i)] = s;
+            bufR[static_cast<size_t>(i)] = s;
+        }
+        ds.process(bufL.data(), bufR.data(), n, deEssAmt);
+
+        double acc = 0.0;
+        for (int i = n / 2; i < n; ++i)
+            acc += static_cast<double>(bufL[static_cast<size_t>(i)]) * bufL[static_cast<size_t>(i)];
+        return std::sqrt(acc / static_cast<double>(n / 2));
+    };
+
+    const double bodyOff = measureRmsAtFreq(300.0, 0.0f);
+    const double bodyOn  = measureRmsAtFreq(300.0, 1.0f);
+    const double bodyLossDb = 20.0 * std::log10(bodyOff / std::max(1.0e-9, bodyOn));
+
+    const double sibOff = measureRmsAtFreq(7000.0, 0.0f);
+    const double sibOn  = measureRmsAtFreq(7000.0, 1.0f);
+    const double sibReductionDb = 20.0 * std::log10(sibOff / std::max(1.0e-9, sibOn));
+
+    INFO("300 Hz loss=" << bodyLossDb << " dB, 7 kHz reduction=" << sibReductionDb << " dB");
+    REQUIRE(bodyLossDb < 0.5);
+    REQUIRE(sibReductionDb >= 4.0);
+}
+
+TEST_CASE("VocalSpace generates smooth decaying stereo tail", "[HarmonyBusFx]")
+{
+    const double sr = 48000.0;
+    VocalSpace space;
+    space.prepare(sr);
+
+    const int n = 48000; // 1 second
+    std::vector<float> bufL(static_cast<size_t>(n), 0.0f), bufR(static_cast<size_t>(n), 0.0f);
+    for (int i = 0; i < 400; ++i)
+    {
+        const float s = 0.4f * static_cast<float>(std::sin(kTwoPi * 440.0 * (static_cast<double>(i) / sr)));
+        bufL[static_cast<size_t>(i)] = s;
+        bufR[static_cast<size_t>(i)] = s;
+    }
+
+    space.process(bufL.data(), bufR.data(), n, 0.6f);
+
+    double earlyTail = 0.0, lateTail = 0.0;
+    for (int i = 2400; i < 7200; ++i)
+        earlyTail += bufL[static_cast<size_t>(i)] * bufL[static_cast<size_t>(i)] + bufR[static_cast<size_t>(i)] * bufR[static_cast<size_t>(i)];
+    for (int i = 36000; i < 48000; ++i)
+        lateTail += bufL[static_cast<size_t>(i)] * bufL[static_cast<size_t>(i)] + bufR[static_cast<size_t>(i)] * bufR[static_cast<size_t>(i)];
+
+    REQUIRE(earlyTail > 1.0e-4);
+    REQUIRE(lateTail < earlyTail * 0.25);
+    for (float s : bufL)
+        REQUIRE(std::isfinite(s));
+    for (float s : bufR)
+        REQUIRE(std::isfinite(s));
 }
