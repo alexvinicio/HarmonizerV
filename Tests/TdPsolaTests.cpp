@@ -1,0 +1,181 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include "Dsp/PitchMarkDetector.h"
+#include "Dsp/PitchTracker.h"
+#include "Dsp/TdPsolaVoice.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <vector>
+
+namespace
+{
+std::vector<float> makeRichVocalWave(double f0Hz, double fs, int numSamples)
+{
+    std::vector<float> out(static_cast<size_t>(numSamples), 0.0f);
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const double t = static_cast<double>(i) / fs;
+        double sum = 0.0;
+        for (int h = 1; h <= 12; ++h)
+        {
+            const double freq = h * f0Hz;
+            if (freq >= fs * 0.42)
+                break;
+            // Broad spectral resonance around 1000 Hz to test formant shifts clearly
+            const double env = 0.5 / (1.0 + std::pow((freq - 1000.0) / 500.0, 2.0)) + 0.3 / h;
+            sum += env * std::sin(harmonizer::dsp::kTwoPi * freq * t);
+        }
+        out[static_cast<size_t>(i)] = static_cast<float>(sum * 0.25);
+    }
+    return out;
+}
+
+std::vector<float> runTdPsola(const std::vector<float>& input, double fs, float shiftSt, float formantSt, int& outLatency)
+{
+    harmonizer::dsp::PitchTracker tracker;
+    harmonizer::dsp::PitchMarkDetector marks;
+    harmonizer::dsp::TdPsolaVoice voice;
+
+    tracker.prepare(fs);
+    marks.prepare(fs);
+    voice.prepare(fs);
+    outLatency = voice.getLatencySamples();
+
+    std::vector<float> output(input.size(), 0.0f);
+    for (size_t i = 0; i < input.size(); ++i)
+    {
+        tracker.pushSample(input[i]);
+        const auto est = tracker.getEstimate();
+        const float f0 = tracker.getSmoothedValidHz();
+        const int64_t pos = marks.getWritePos();
+        marks.pushSample(input[i], f0, est.isVoiced);
+        output[i] = voice.processSample(marks, pos, f0, est.isVoiced, shiftSt, formantSt);
+    }
+    return output;
+}
+
+double findStrongestHarmonicPeakHz(const std::vector<float>& sig, int startIdx, int len, double fs, double expectedF0)
+{
+    // Search closely around expected fundamental [0.75 * expectedF0, 1.35 * expectedF0] with fine DFT grid
+    const double minF = std::max(50.0, expectedF0 * 0.75);
+    const double maxF = std::min(fs * 0.4, expectedF0 * 1.35);
+    double bestFreq = expectedF0;
+    double bestMag = -1.0;
+
+    const int steps = 400;
+    for (int s = 0; s <= steps; ++s)
+    {
+        const double f = minF + (maxF - minF) * (static_cast<double>(s) / steps);
+        double re = 0.0, im = 0.0;
+        const double wStep = harmonizer::dsp::kTwoPi * f / fs;
+        for (int n = 0; n < len; ++n)
+        {
+            const double win = 0.5 * (1.0 - std::cos(harmonizer::dsp::kTwoPi * n / (len - 1)));
+            const double x = static_cast<double>(sig[static_cast<size_t>(startIdx + n)]) * win;
+            re += x * std::cos(wStep * n);
+            im -= x * std::sin(wStep * n);
+        }
+        const double mag = re * re + im * im;
+        if (mag > bestMag)
+        {
+            bestMag = mag;
+            bestFreq = f;
+        }
+    }
+    return bestFreq;
+}
+
+double computeSpectralCentroidHz(const std::vector<float>& sig, int startIdx, int len, double fs)
+{
+    double weightedSum = 0.0;
+    double magSum = 0.0;
+    const double minF = 150.0;
+    const double maxF = 4500.0;
+    const int bins = 120;
+
+    for (int b = 0; b <= bins; ++b)
+    {
+        const double f = minF + (maxF - minF) * (static_cast<double>(b) / bins);
+        double re = 0.0, im = 0.0;
+        const double wStep = harmonizer::dsp::kTwoPi * f / fs;
+        for (int n = 0; n < len; ++n)
+        {
+            const double win = 0.5 * (1.0 - std::cos(harmonizer::dsp::kTwoPi * n / (len - 1)));
+            const double x = static_cast<double>(sig[static_cast<size_t>(startIdx + n)]) * win;
+            re += x * std::cos(wStep * n);
+            im -= x * std::sin(wStep * n);
+        }
+        const double mag = std::sqrt(re * re + im * im);
+        weightedSum += f * mag;
+        magSum += mag;
+    }
+    return (magSum > 1.0e-9) ? (weightedSum / magSum) : 0.0;
+}
+} // namespace
+
+TEST_CASE("TdPsolaVoice latency <= 12ms and pitch shifting accuracy across intervals", "[TdPsolaVoice]")
+{
+    const double fs = 48000.0;
+    const double f0 = 220.0;
+    const auto input = makeRichVocalWave(f0, fs, 28800); // 600 ms
+
+    const float shifts[] = { +4.0f, +7.0f, -5.0f, +12.0f, -12.0f };
+    for (float st : shifts)
+    {
+        int latency = 0;
+        const auto out = runTdPsola(input, fs, st, 0.0f, latency);
+
+        REQUIRE(latency <= 576); // <= 12.0 ms at 48 kHz
+
+        for (float s : out)
+        {
+            REQUIRE(std::isfinite(s));
+            REQUIRE(std::abs(s) < 2.0f);
+        }
+
+        const double expectedHz = f0 * std::pow(2.0, st / 12.0);
+        const double measuredHz = findStrongestHarmonicPeakHz(out, 12000, 8192, fs, expectedHz);
+        const double errCents = 1200.0 * std::log2(measuredHz / expectedHz);
+
+        INFO("Shift=" << st << " st, expected=" << expectedHz << " Hz, measured=" << measuredHz << " Hz, err=" << errCents << " cents");
+        REQUIRE(std::abs(errCents) <= 25.0);
+    }
+}
+
+TEST_CASE("TdPsolaVoice formant shift moves spectral envelope independently", "[TdPsolaVoice]")
+{
+    const double fs = 48000.0;
+    const auto input = makeRichVocalWave(220.0, fs, 24000);
+
+    int lat = 0;
+    const auto outDown = runTdPsola(input, fs, +4.0f, -6.0f, lat);
+    const auto outUp   = runTdPsola(input, fs, +4.0f, +6.0f, lat);
+
+    const double centroidDown = computeSpectralCentroidHz(outDown, 10000, 4096, fs);
+    const double centroidUp   = computeSpectralCentroidHz(outUp, 10000, 4096, fs);
+
+    INFO("Centroid (-6st formant)=" << centroidDown << " Hz, (+6st formant)=" << centroidUp << " Hz");
+    REQUIRE(centroidUp > centroidDown * 1.15);
+}
+
+TEST_CASE("TdPsolaVoice handles unvoiced noise cleanly without NaNs or clipping", "[TdPsolaVoice]")
+{
+    const double fs = 48000.0;
+    std::vector<float> noise(16384, 0.0f);
+    uint32_t rng = 0xCAFEBABEu;
+    for (float& s : noise)
+    {
+        rng = rng * 1664525u + 1013904223u;
+        s = (static_cast<float>(rng & 0xFFFFu) / 32768.0f - 1.0f) * 0.3f;
+    }
+
+    int lat = 0;
+    const auto out = runTdPsola(noise, fs, +7.0f, +2.0f, lat);
+    for (float s : out)
+    {
+        REQUIRE(std::isfinite(s));
+        REQUIRE(std::abs(s) < 2.0f);
+    }
+}

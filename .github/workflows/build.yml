@@ -1,0 +1,70 @@
+name: Build and Validate HarmonizerV
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows-x64
+            generator_args: -A x64
+            vst3_path: build/HarmonizerV_artefacts/Release/VST3/HarmonizerV.vst3
+            standalone_path: build/HarmonizerV_artefacts/Release/Standalone/HarmonizerV.exe
+          - os: macos-14
+            name: macOS-Universal
+            generator_args: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+            vst3_path: build/HarmonizerV_artefacts/Release/VST3/HarmonizerV.vst3
+            au_path: build/HarmonizerV_artefacts/Release/AU/HarmonizerV.component
+            standalone_path: build/HarmonizerV_artefacts/Release/Standalone/HarmonizerV.app
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DHARMONIZERV_BUILD_TESTS=ON ${{ matrix.generator_args }}
+
+      - name: Build HarmonizerV and DSP tests
+        run: cmake --build build --config Release --parallel
+
+      - name: Run Catch2 DSP unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Download and run pluginval (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $url = "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip"
+          Invoke-WebRequest -Uri $url -OutFile pluginval.zip
+          Expand-Archive -Path pluginval.zip -DestinationPath pluginval_bin -Force
+          $exe = Get-ChildItem -Path pluginval_bin -Filter "pluginval.exe" -Recurse | Select-Object -First 1
+          & $exe.FullName --strictness-level 5 --validate "${{ matrix.vst3_path }}"
+
+      - name: Download and run pluginval (macOS)
+        if: matrix.os == 'macos-14'
+        run: |
+          curl -L -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip"
+          unzip -q pluginval.zip -d pluginval_bin
+          APP=$(find pluginval_bin -name "pluginval.app" | head -n 1)
+          "$APP/Contents/MacOS/pluginval" --strictness-level 5 --validate "${{ matrix.vst3_path }}"
+          "$APP/Contents/MacOS/pluginval" --strictness-level 5 --validate "${{ matrix.au_path }}"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: HarmonizerV-${{ matrix.name }}
+          path: |
+            ${{ matrix.vst3_path }}
+            ${{ matrix.au_path }}
+            ${{ matrix.standalone_path }}
+          if-no-files-found: ignore

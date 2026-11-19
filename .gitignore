@@ -1,0 +1,9 @@
+build/
+build-*/
+Backups/
+.vs/
+out/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
