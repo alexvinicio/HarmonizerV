@@ -31,6 +31,7 @@ public:
     int getNumFactoryPresets() const noexcept { return numFactoryPresets; }
 
     void loadPreset(int index);
+    void applyVoicingPreset(int voicingIndex);
     bool saveUserPreset(const juce::String& name);
 
     int getCurrentPresetIndex() const noexcept { return currentIndex; }

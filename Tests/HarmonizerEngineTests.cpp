@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include "Dsp/HarmonizerEngine.h"
+#include "Dsp/VoicingPresets.h"
 
 #include <algorithm>
 #include <array>
@@ -16,10 +17,10 @@ namespace
 std::array<VoiceParams, kMaxVoices> makeFourActiveVoices()
 {
     std::array<VoiceParams, kMaxVoices> vp{};
-    vp[0] = { true, false, false, -2, -4.0f, -1.0f,  5.0f, 110.0f, 13000.0f, -0.5f, -6.0f };
-    vp[1] = { true, false, false, +2, +4.0f, +0.5f,  8.0f, 130.0f, 14000.0f, +0.5f, -5.0f };
-    vp[2] = { true, false, false, +4, -3.0f,  0.0f, 14.0f, 150.0f, 12500.0f, -0.8f, -7.5f };
-    vp[3] = { true, false, false, +7, +3.0f, +2.0f, 19.0f, 220.0f, 15500.0f, +0.8f, -9.0f };
+    vp[0] = { true, false, false, false, 60, -2, -4.0f, -1.0f,  5.0f, 110.0f, 13000.0f, -0.5f, -6.0f, 0.0f };
+    vp[1] = { true, false, false, false, 60, +2, +4.0f, +0.5f,  8.0f, 130.0f, 14000.0f, +0.5f, -5.0f, 0.0f };
+    vp[2] = { true, false, false, false, 60, +4, -3.0f,  0.0f, 14.0f, 150.0f, 12500.0f, -0.8f, -7.5f, 0.0f };
+    vp[3] = { true, false, false, false, 60, +7, +3.0f, +2.0f, 19.0f, 220.0f, 15500.0f, +0.8f, -9.0f, 0.0f };
     return vp;
 }
 } // namespace
@@ -810,4 +811,224 @@ TEST_CASE("HarmonizerEngine click-free Bypass passes exact latency-aligned dry a
     }
 
     REQUIRE(maxDelta < 0.45f);
+}
+
+TEST_CASE("HarmonizerEngine 8-voice bank, MIDI 8-note polyphony, and 8V->4V voice limit transitions", "[HarmonizerEngine][8Voices]")
+{
+    const double sr = 48000.0;
+    const int bs = 128;
+
+    HarmonizerEngine engine;
+    engine.prepare(sr, bs, LiveBufferSize::Fast256);
+
+    GlobalParams gp;
+    gp.engineMode = EngineMode::Live;
+    gp.activeVoiceBankCount = 8;
+    gp.mix = 1.0f;
+
+    std::array<VoiceParams, kMaxVoices> vp{};
+    const int intervals[8] = { -7, -4, -2, +2, +4, +6, +7, +9 };
+    const float pans[8] = { -0.8f, -0.6f, -0.35f, -0.15f, +0.15f, +0.35f, +0.6f, +0.8f };
+    for (int v = 0; v < kMaxVoices; ++v)
+    {
+        vp[static_cast<size_t>(v)] = {
+            true, false, false, false, 60, intervals[v],
+            0.0f, 0.0f, static_cast<float>(3 + v * 3), 100.0f, 14000.0f, pans[v], -6.5f, 0.2f
+        };
+    }
+
+    std::vector<float> in(bs, 0.0f), outL(bs, 0.0f), outR(bs, 0.0f);
+    float maxPeak = 0.0f;
+    for (int blk = 0; blk < 40; ++blk)
+    {
+        for (int i = 0; i < bs; ++i)
+        {
+            const double t = static_cast<double>(blk * bs + i) / sr;
+            in[static_cast<size_t>(i)] = 0.35f * static_cast<float>(std::sin(kTwoPi * 220.0 * t));
+        }
+        const float* inPtr[1] = { in.data() };
+        float* outPtr[2] = { outL.data(), outR.data() };
+        engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+
+        for (int i = 0; i < bs; ++i)
+        {
+            REQUIRE(std::isfinite(outL[static_cast<size_t>(i)]));
+            REQUIRE(std::isfinite(outR[static_cast<size_t>(i)]));
+            maxPeak = std::max(maxPeak, std::max(std::abs(outL[static_cast<size_t>(i)]), std::abs(outR[static_cast<size_t>(i)])));
+        }
+    }
+    REQUIRE(maxPeak <= 0.99f);
+    REQUIRE(engine.getTelemetry().activeVoiceBankCount == 8);
+
+    // 8-note MIDI chord allocation + clean shrink 8V -> 4V
+    gp.harmonyMode = HarmonyMode::Midi;
+    const int notes[8] = { 60, 62, 64, 65, 67, 69, 71, 72 };
+    for (int n : notes)
+        engine.handleNoteOn(n, 0.85f);
+
+    for (int blk = 0; blk < 12; ++blk)
+    {
+        const float* inPtr[1] = { in.data() };
+        float* outPtr[2] = { outL.data(), outR.data() };
+        engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+    }
+
+    auto snap8 = engine.getTelemetry();
+    for (int v = 0; v < 8; ++v)
+        REQUIRE(snap8.voiceMidiActive[static_cast<size_t>(v)]);
+
+    gp.activeVoiceBankCount = 4;
+    for (int blk = 0; blk < 16; ++blk)
+    {
+        const float* inPtr[1] = { in.data() };
+        float* outPtr[2] = { outL.data(), outR.data() };
+        engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+    }
+    auto snap4 = engine.getTelemetry();
+    REQUIRE(snap4.activeVoiceBankCount == 4);
+    for (int v = 4; v < 8; ++v)
+        REQUIRE_FALSE(snap4.voiceMidiActive[static_cast<size_t>(v)]);
+}
+
+TEST_CASE("HarmonizerEngine 8-voice LIVE mode CPU benchmark", "[HarmonizerEngine][benchmark][8Voices]")
+{
+    const double sr = 48000.0;
+    const int bs = 128;
+    const int totalSamples = 96000; // 2.0 s
+
+    HarmonizerEngine engine;
+    engine.prepare(sr, bs, LiveBufferSize::Fast256);
+
+    GlobalParams gp;
+    gp.engineMode = EngineMode::Live;
+    gp.activeVoiceBankCount = 8;
+    gp.mix = 0.5f;
+    gp.humanize = 0.25f;
+
+    std::array<VoiceParams, kMaxVoices> vp{};
+    for (int v = 0; v < kMaxVoices; ++v)
+        vp[static_cast<size_t>(v)] = { true, false, false, false, 60, v - 3, 0.0f, 0.0f, 8.0f, 120.0f, 13500.0f, 0.0f, -7.0f, 0.2f };
+
+    std::vector<float> in(static_cast<size_t>(totalSamples), 0.0f);
+    std::vector<float> outL(bs, 0.0f), outR(bs, 0.0f);
+    for (int i = 0; i < totalSamples; ++i)
+    {
+        const double t = static_cast<double>(i) / sr;
+        in[static_cast<size_t>(i)] = 0.25f * static_cast<float>(std::sin(kTwoPi * 220.0 * t));
+    }
+
+    const auto start = std::chrono::steady_clock::now();
+    for (int off = 0; off < totalSamples; off += bs)
+    {
+        const float* inPtr[1] = { in.data() + off };
+        float* outPtr[2] = { outL.data(), outR.data() };
+        engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+    }
+    const auto elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    const double cpuPct = (elapsedMs / 2000.0) * 100.0;
+    WARN("8-Voice LIVE mode processed 2000ms audio in " << elapsedMs << " ms (" << cpuPct << "% real-time CPU)");
+#ifdef NDEBUG
+    REQUIRE(elapsedMs < 1100.0); // < 55% real-time for 8 simultaneous voices
+#else
+    REQUIRE(elapsedMs < 3500.0);
+#endif
+}
+
+TEST_CASE("HarmonizerEngine Fixed Pedal Note stays locked on C4 while input steps C4 -> E4", "[HarmonizerEngine][FixedNote]")
+{
+    const double sr = 48000.0;
+    const int bs = 128;
+
+    HarmonizerEngine engine;
+    engine.prepare(sr, bs, LiveBufferSize::Safe512);
+
+    GlobalParams gp;
+    gp.engineMode = EngineMode::Live;
+    gp.liveBufferSize = LiveBufferSize::Safe512;
+    gp.mix = 1.0f;
+    gp.spaceAmount = 0.0f;
+    gp.humanize = 0.0f;
+    gp.glideMs = 15.0f;
+
+    std::array<VoiceParams, kMaxVoices> vp{};
+    vp[0] = { true, false, false, true, 60, 0, 0.0f, 0.0f, 0.0f, 60.0f, 18000.0f, 0.0f, 0.0f, 0.0f };
+
+    const int blocksPerNote = 180; // ~480 ms
+    std::vector<float> out(static_cast<size_t>(2 * blocksPerNote * bs), 0.0f);
+    std::vector<float> in(bs, 0.0f), outL(bs, 0.0f), outR(bs, 0.0f);
+    double phase = 0.0;
+
+    for (int blk = 0; blk < 2 * blocksPerNote; ++blk)
+    {
+        const double f0 = (blk < blocksPerNote) ? 261.6256 : 329.6276; // C4 -> E4
+        for (int i = 0; i < bs; ++i)
+        {
+            phase += kTwoPi * f0 / sr;
+            in[static_cast<size_t>(i)] = static_cast<float>(0.30 * std::sin(phase) + 0.12 * std::sin(2.0 * phase));
+        }
+        const float* inPtr[1] = { in.data() };
+        float* outPtr[2] = { outL.data(), outR.data() };
+        engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+        for (int i = 0; i < bs; ++i)
+            out[static_cast<size_t>(blk * bs + i)] = outL[static_cast<size_t>(i)];
+    }
+
+    // Measure peak frequency on second half (input is E4 = 329.63 Hz, pedal voice must hold C4 = 261.63 Hz)
+    const int startIdx = blocksPerNote * bs + 8000;
+    const int len = 8192;
+    double bestFreq = 261.63;
+    double bestMag = -1.0;
+    for (int step = 0; step <= 260; ++step)
+    {
+        const double f = 220.0 + 140.0 * (static_cast<double>(step) / 260.0);
+        double re = 0.0, im = 0.0;
+        const double wStep = kTwoPi * f / sr;
+        for (int n = 0; n < len; ++n)
+        {
+            const double win = 0.5 * (1.0 - std::cos(kTwoPi * n / (len - 1)));
+            const double x = static_cast<double>(out[static_cast<size_t>(startIdx + n)]) * win;
+            re += x * std::cos(wStep * n);
+            im -= x * std::sin(wStep * n);
+        }
+        const double mag = re * re + im * im;
+        if (mag > bestMag)
+        {
+            bestMag = mag;
+            bestFreq = f;
+        }
+    }
+
+    const double errCents = 1200.0 * std::log2(bestFreq / 261.6256);
+    INFO("Input=329.63 Hz (E4), Pedal output=" << bestFreq << " Hz (err vs C4=" << errCents << " cents)");
+    REQUIRE(std::abs(errCents) <= 35.0);
+}
+
+TEST_CASE("VoiceChannelStrip vibrato produces organic pitch modulation and VoicingPresets validate cleanly", "[Vibrato][VoicingPresets]")
+{
+    VoiceChannelStrip strip;
+    strip.prepare(48000.0, 0);
+
+    // Zero humanize + zero vibrato -> 0 cents
+    for (int b = 0; b < 50; ++b)
+        REQUIRE(strip.computeHumanizeCents(0.0f, 0.0f, 1.0f, 128) == 0.0f);
+
+    // Zero humanize + full vibrato -> swings +/- ~30 cents
+    float maxAbsVib = 0.0f;
+    for (int b = 0; b < 200; ++b)
+        maxAbsVib = std::max(maxAbsVib, std::abs(strip.computeHumanizeCents(0.0f, 1.0f, 1.0f, 128)));
+    REQUIRE(maxAbsVib >= 20.0f);
+    REQUIRE(maxAbsVib <= 31.0f);
+
+    // Validate VoicingPresets ASCII names and computePedalMidiNote bounds
+    for (const auto& vp : kVoicingPresets)
+    {
+        for (const char* p = vp.name; *p != '\0'; ++p)
+            REQUIRE(static_cast<unsigned char>(*p) < 128);
+    }
+    for (int key = 0; key < 12; ++key)
+    {
+        const int note = computePedalMidiNote(key, 0);
+        REQUIRE(note >= 48);
+        REQUIRE(note <= 72);
+    }
 }

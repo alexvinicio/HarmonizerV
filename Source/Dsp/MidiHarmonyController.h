@@ -25,6 +25,7 @@ class MidiHarmonyController
 public:
     void prepare(double sampleRate, int maxActiveSlots = kExposedVoicesV1) noexcept;
     void reset() noexcept;
+    void setActiveSlotCount(int maxActiveSlots) noexcept;
 
     void noteOn(int midiNote, float velocity) noexcept;
     void noteOff(int midiNote) noexcept;

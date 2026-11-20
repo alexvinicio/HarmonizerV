@@ -128,6 +128,7 @@ private:
         std::atomic<bool> isVoiced{ false };
         std::atomic<bool> bypassed{ false };
         std::atomic<int> activeLatencySamples{ 256 };
+        std::atomic<int> activeVoiceBankCount{ 4 };
         std::atomic<int> activeMode{ 0 };
         std::atomic<int> activeHarmonyMode{ 0 };
         std::atomic<float> inputTuneCorrectionCents{ 0.0f };

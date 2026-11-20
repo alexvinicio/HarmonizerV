@@ -30,6 +30,7 @@ SnapshotManager::SnapshotManager(juce::AudioProcessorValueTreeState& state)
     : apvts(state)
 {
     int idx = 0;
+    sceneParamIds[static_cast<size_t>(idx++)] = params::voiceBank;
     sceneParamIds[static_cast<size_t>(idx++)] = params::harmonyMode;
     sceneParamIds[static_cast<size_t>(idx++)] = params::mix;
     sceneParamIds[static_cast<size_t>(idx++)] = params::humanize;
@@ -39,11 +40,13 @@ SnapshotManager::SnapshotManager(juce::AudioProcessorValueTreeState& state)
     sceneParamIds[static_cast<size_t>(idx++)] = params::deEssAmount;
     sceneParamIds[static_cast<size_t>(idx++)] = params::spaceAmount;
 
-    for (int v = 0; v < dsp::kExposedVoicesV1; ++v)
+    for (int v = 0; v < dsp::kExposedVoices; ++v)
     {
         sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vEnabled);
         sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vMute);
         sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vSolo);
+        sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vFixed);
+        sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vFixedNote);
         sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vInterval);
         sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vDetune);
         sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vFormant);
@@ -52,6 +55,7 @@ SnapshotManager::SnapshotManager(juce::AudioProcessorValueTreeState& state)
         sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vLpfHz);
         sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vPan);
         sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vGainDb);
+        sceneParamIds[static_cast<size_t>(idx++)] = params::voiceParamId(v, params::vVibrato);
     }
 
     const auto cur = readCurrentSceneValues();

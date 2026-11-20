@@ -53,6 +53,7 @@ public:
                          juce::Colour accentColour = Theme::liveAccent);
 
     void setAccentColour(juce::Colour c);
+    void setTitle(const juce::String& newTitle);
     void setValueFormatter(std::function<juce::String(double)> formatter);
 
     void attach(juce::AudioProcessorValueTreeState& apvts, const juce::String& paramId);

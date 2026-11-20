@@ -22,6 +22,20 @@ void MidiHarmonyController::reset() noexcept
     nextAge = 1;
 }
 
+void MidiHarmonyController::setActiveSlotCount(int maxActiveSlots) noexcept
+{
+    const int newSlots = std::clamp(maxActiveSlots, 1, kMaxVoices);
+    if (newSlots < activeSlots)
+    {
+        for (int i = newSlots; i < activeSlots; ++i)
+        {
+            slots[static_cast<size_t>(i)].keyHeld = false;
+            slots[static_cast<size_t>(i)].sustained = false;
+        }
+    }
+    activeSlots = newSlots;
+}
+
 void MidiHarmonyController::noteOn(int midiNote, float velocity) noexcept
 {
     if (midiNote < 0 || midiNote > 127)
@@ -133,14 +147,15 @@ void MidiHarmonyController::advanceBlock(int numSamples) noexcept
     const float attackAlpha = static_cast<float>(1.0 - std::exp(-static_cast<double>(numSamples) / (0.010 * fs)));
     const float releaseAlpha = static_cast<float>(1.0 - std::exp(-static_cast<double>(numSamples) / (0.065 * fs)));
 
-    for (int i = 0; i < activeSlots; ++i)
+    for (int i = 0; i < kMaxVoices; ++i)
     {
         auto& s = slots[static_cast<size_t>(i)];
-        const float target = s.isActive() ? 1.0f : 0.0f;
+        const bool inPool = (i < activeSlots);
+        const float target = (inPool && s.isActive()) ? 1.0f : 0.0f;
         const float alpha = (target > s.gateEnvelope) ? attackAlpha : releaseAlpha;
         s.gateEnvelope += alpha * (target - s.gateEnvelope);
 
-        if (!s.isActive() && s.gateEnvelope < 0.0005f)
+        if ((!inPool || !s.isActive()) && s.gateEnvelope < 0.0005f)
             s.gateEnvelope = 0.0f;
     }
 }

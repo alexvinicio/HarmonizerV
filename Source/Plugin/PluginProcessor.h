@@ -68,6 +68,8 @@ private:
         std::atomic<float>* enabled = nullptr;
         std::atomic<float>* mute = nullptr;
         std::atomic<float>* solo = nullptr;
+        std::atomic<float>* fixed = nullptr;
+        std::atomic<float>* fixedNote = nullptr;
         std::atomic<float>* interval = nullptr;
         std::atomic<float>* detune = nullptr;
         std::atomic<float>* formant = nullptr;
@@ -76,6 +78,7 @@ private:
         std::atomic<float>* lpfHz = nullptr;
         std::atomic<float>* pan = nullptr;
         std::atomic<float>* gainDb = nullptr;
+        std::atomic<float>* vibrato = nullptr;
     };
 
     juce::UndoManager undoManager;
@@ -87,6 +90,7 @@ private:
 
     std::atomic<float>* keyParam = nullptr;
     std::atomic<float>* scaleParam = nullptr;
+    std::atomic<float>* voiceBankParam = nullptr;
     std::atomic<float>* engineModeParam = nullptr;
     std::atomic<float>* liveBufferParam = nullptr;
     std::atomic<float>* harmonyModeParam = nullptr;
@@ -101,7 +105,7 @@ private:
     std::atomic<float>* spaceParam = nullptr;
     std::atomic<float>* bypassParam = nullptr;
 
-    std::array<VoiceAtomics, dsp::kExposedVoicesV1> voiceAtomics{};
+    std::array<VoiceAtomics, dsp::kExposedVoices> voiceAtomics{};
     std::atomic<double> currentSampleRate{ 48000.0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(HarmonizerVProcessor)

@@ -10,6 +10,7 @@ namespace harmonizer::dsp
 
 inline constexpr int kMaxVoices = 8;
 inline constexpr int kExposedVoicesV1 = 4;
+inline constexpr int kExposedVoices = kMaxVoices;
 
 inline constexpr float kMinVocalHz = 75.0f;
 inline constexpr float kMaxVocalHz = 1100.0f;
@@ -42,6 +43,8 @@ struct VoiceParams
     bool enabled = false;
     bool mute = false;
     bool solo = false;
+    bool fixedPitch = false;        // false = diatonic interval, true = locked to fixedMidiNote
+    int fixedMidiNote = 60;         // 36..96 (C2..C7)
     int intervalSteps = 2;       // Diatonic steps (-14..+14)
     float detuneCents = 0.0f;    // -50..+50 cents
     float formantSemitones = 0.0f; // -12..+12 semitones
@@ -50,12 +53,14 @@ struct VoiceParams
     float lpfHz = 16000.0f;      // 2000..18000 Hz
     float pan = 0.0f;            // -1..+1
     float gainDb = -6.0f;        // -60..+6 dB
+    float vibratoDepth = 0.0f;   // 0..1 natural staggered vocal vibrato (up to +/- 30 ct)
 };
 
 struct GlobalParams
 {
     int key = 0;                 // 0..11 (C..B)
     int scaleIndex = 0;          // 0..8
+    int activeVoiceBankCount = 4;// 4 or 8 (4V / 8V mode)
     EngineMode engineMode = EngineMode::Live;
     HarmonyMode harmonyMode = HarmonyMode::Auto;
     LiveBufferSize liveBufferSize = LiveBufferSize::Fast256;
@@ -82,6 +87,7 @@ struct TelemetrySnapshot
     bool isVoiced = false;
     bool bypassed = false;
     int activeLatencySamples = 0;
+    int activeVoiceBankCount = 4;
     EngineMode activeMode = EngineMode::Live;
     HarmonyMode activeHarmonyMode = HarmonyMode::Auto;
     float inputTuneCorrectionCents = 0.0f;

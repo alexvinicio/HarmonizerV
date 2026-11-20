@@ -46,15 +46,23 @@ private:
     float getParamPlain(const juce::String& id, float fallback = 0.0f) const noexcept;
     void setParamPlain(const juce::String& id, float plainVal, bool notifyGesture);
     void showSnapshotContextMenu(int slotIndex);
+    void showVoicingMenu();
+    void updateHeaderLayout() noexcept;
+    int getVisibleVoiceCount() const noexcept;
+    static juce::String formatMidiNoteName(int note);
 
     HarmonizerVProcessor& processor;
     dsp::TelemetrySnapshot latestSnap{};
     int selectedVoice = 0;
+    int lastVisibleVoices = 4;
 
     int draggingVoice = -1;
+    bool draggingFixed = false;
     bool gestureActive = false;
 
-    std::array<juce::Rectangle<float>, dsp::kExposedVoicesV1> pillRects{};
+    std::array<juce::Rectangle<float>, dsp::kMaxVoices> pillRects{};
+    juce::Rectangle<float> bankToggleRect{};
+    juce::Rectangle<float> voicingBtnRect{};
     std::array<juce::Rectangle<float>, dsp::kNumSnapshots> snapPillRects{};
     juce::Rectangle<float> undoBtnRect{};
     juce::Rectangle<float> redoBtnRect{};

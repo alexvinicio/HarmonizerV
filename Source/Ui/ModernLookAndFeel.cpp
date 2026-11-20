@@ -190,6 +190,15 @@ void LabeledKnob::setAccentColour(juce::Colour c)
     repaint();
 }
 
+void LabeledKnob::setTitle(const juce::String& newTitle)
+{
+    if (title != newTitle)
+    {
+        title = newTitle;
+        repaint();
+    }
+}
+
 void LabeledKnob::setValueFormatter(std::function<juce::String(double)> formatter)
 {
     slider.customFormatter = std::move(formatter);

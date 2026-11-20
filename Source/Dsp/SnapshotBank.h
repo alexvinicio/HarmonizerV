@@ -9,9 +9,9 @@ namespace harmonizer::dsp
 {
 
 inline constexpr int kNumSnapshots = 4;
-inline constexpr int kSceneGlobalCount = 8;      // harmony_mode, mix, humanize, input_tune, glide_ms, natural, deess, space
-inline constexpr int kSceneVoiceParamCount = 11; // enabled, mute, solo, interval, detune, formant, delay_ms, hpf_hz, lpf_hz, pan, gain_db
-inline constexpr int kSceneParamCount = kSceneGlobalCount + kExposedVoicesV1 * kSceneVoiceParamCount;
+inline constexpr int kSceneGlobalCount = 9;      // voice_bank, harmony_mode, mix, humanize, input_tune, glide_ms, natural, deess, space
+inline constexpr int kSceneVoiceParamCount = 14; // enabled, mute, solo, fixed, fixed_note, interval, detune, formant, delay_ms, hpf_hz, lpf_hz, pan, gain_db, vibrato
+inline constexpr int kSceneParamCount = kSceneGlobalCount + kExposedVoices * kSceneVoiceParamCount;
 
 using SceneValues = std::array<float, kSceneParamCount>;
 

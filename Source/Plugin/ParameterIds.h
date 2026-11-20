@@ -9,6 +9,7 @@ namespace harmonizer::params
 
 inline constexpr const char* key         = "key";
 inline constexpr const char* scale       = "scale";
+inline constexpr const char* voiceBank   = "voice_bank";
 inline constexpr const char* engineMode  = "engine_mode";
 inline constexpr const char* liveBuffer  = "live_buffer";
 inline constexpr const char* harmonyMode = "harmony_mode";
@@ -26,6 +27,8 @@ inline constexpr const char* bypass      = "bypass";
 inline constexpr const char* vEnabled  = "enabled";
 inline constexpr const char* vMute     = "mute";
 inline constexpr const char* vSolo     = "solo";
+inline constexpr const char* vFixed    = "fixed";
+inline constexpr const char* vFixedNote= "fixed_note";
 inline constexpr const char* vInterval = "interval";
 inline constexpr const char* vDetune   = "detune";
 inline constexpr const char* vFormant  = "formant";
@@ -34,6 +37,7 @@ inline constexpr const char* vHpfHz    = "hpf_hz";
 inline constexpr const char* vLpfHz    = "lpf_hz";
 inline constexpr const char* vPan      = "pan";
 inline constexpr const char* vGainDb   = "gain_db";
+inline constexpr const char* vVibrato  = "vibrato";
 
 inline juce::String voiceParamId(int voiceIndex, const char* suffix)
 {

@@ -14,8 +14,16 @@ public:
     void prepare(double sampleRate, int voiceIndex);
     void reset() noexcept;
 
-    // Advances organic non-periodic drift and returns micro-pitch modulation in cents (+/- 7ct max)
-    float computeHumanizeCents(float humanizeAmount, int numSamples) noexcept;
+    // Advances organic non-periodic drift + staggered vibrato and returns pitch modulation in cents
+    float computeHumanizeCents(float humanizeAmount,
+                               float vibratoDepth,
+                               float voicingConfidence,
+                               int numSamples) noexcept;
+
+    float computeHumanizeCents(float humanizeAmount, int numSamples) noexcept
+    {
+        return computeHumanizeCents(humanizeAmount, 0.0f, 1.0f, numSamples);
+    }
 
     void processAndAccumulate(const float* monoIn,
                               float* wetOutL,
@@ -74,6 +82,10 @@ private:
     double phasePitchA = 0.0;
     double phasePitchB = 0.0;
     double baseRateHz = 0.29;
+    double vibPhase = 0.0;
+    double vibRateHz = 5.2;
+    double panLfoPhase = 0.0;
+    double panLfoRateHz = 0.25;
 
     uint32_t rngState = 0x12345678u;
     float walkPitch = 0.0f;

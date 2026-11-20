@@ -19,6 +19,8 @@ void VoiceChannelStrip::prepare(double sampleRate, int voiceIndex)
     walkAlphaBlock = static_cast<float>(1.0 - std::exp(-kTwoPi * 0.35 * 128.0 / fs));
 
     baseRateHz = 0.23 + static_cast<double>(voiceIndex) * 0.09;
+    vibRateHz = 5.0 + static_cast<double>(voiceIndex) * 0.16;
+    panLfoRateHz = 0.21 + static_cast<double>(voiceIndex) * 0.06;
     reset();
 }
 
@@ -32,6 +34,8 @@ void VoiceChannelStrip::reset() noexcept
     phaseB = std::fmod(static_cast<double>(idx) * 2.51 + 0.7, kTwoPi);
     phasePitchA = std::fmod(static_cast<double>(idx) * 2.19 + 0.8, kTwoPi);
     phasePitchB = std::fmod(static_cast<double>(idx) * 3.13 + 1.4, kTwoPi);
+    vibPhase = std::fmod(static_cast<double>(idx) * 1.93 + 0.4, kTwoPi);
+    panLfoPhase = std::fmod(static_cast<double>(idx) * 2.37 + 1.1, kTwoPi);
 
     rngState = 0x9E3779B9u + static_cast<uint32_t>(idx * 2654435761u);
     walkPitch = 0.0f;
@@ -56,21 +60,40 @@ float VoiceChannelStrip::nextRandomWalkSample(float& state, float alpha) noexcep
     return std::clamp(state * 2.4f, -1.0f, 1.0f);
 }
 
-float VoiceChannelStrip::computeHumanizeCents(float humanizeAmount, int numSamples) noexcept
+float VoiceChannelStrip::computeHumanizeCents(float humanizeAmount,
+                                               float vibratoDepth,
+                                               float voicingConfidence,
+                                               int numSamples) noexcept
 {
     const float h = std::clamp(humanizeAmount, 0.0f, 1.0f);
-    if (h <= 0.001f)
+    const float vib = std::clamp(vibratoDepth, 0.0f, 1.0f);
+    const float voiced = std::clamp(voicingConfidence, 0.0f, 1.0f);
+    if (h <= 0.001f && vib <= 0.001f)
         return 0.0f;
 
     constexpr double kPhi = 1.61803398875;
     const double dt = static_cast<double>(numSamples) / fs;
-    phasePitchA = std::fmod(phasePitchA + kTwoPi * (baseRateHz * 1.13) * dt, kTwoPi);
-    phasePitchB = std::fmod(phasePitchB + kTwoPi * (baseRateHz * 1.13 * kPhi) * dt, kTwoPi);
 
-    const float osc = 0.55f * static_cast<float>(std::sin(phasePitchA))
-                    + 0.45f * static_cast<float>(std::sin(phasePitchB));
-    const float rnd = nextRandomWalkSample(walkPitch, walkAlphaBlock);
-    return 7.0f * h * (0.65f * osc + 0.35f * rnd);
+    float humanizeCents = 0.0f;
+    if (h > 0.001f)
+    {
+        phasePitchA = std::fmod(phasePitchA + kTwoPi * (baseRateHz * 1.13) * dt, kTwoPi);
+        phasePitchB = std::fmod(phasePitchB + kTwoPi * (baseRateHz * 1.13 * kPhi) * dt, kTwoPi);
+
+        const float osc = 0.55f * static_cast<float>(std::sin(phasePitchA))
+                        + 0.45f * static_cast<float>(std::sin(phasePitchB));
+        const float rnd = nextRandomWalkSample(walkPitch, walkAlphaBlock);
+        humanizeCents = 7.0f * h * (0.65f * osc + 0.35f * rnd);
+    }
+
+    float vibCents = 0.0f;
+    if (vib > 0.001f)
+    {
+        vibPhase = std::fmod(vibPhase + kTwoPi * vibRateHz * dt, kTwoPi);
+        vibCents = 30.0f * vib * voiced * static_cast<float>(std::sin(vibPhase));
+    }
+
+    return humanizeCents + vibCents;
 }
 
 void VoiceChannelStrip::processAndAccumulate(const float* monoIn,
@@ -93,6 +116,7 @@ void VoiceChannelStrip::processAndAccumulate(const float* monoIn,
     constexpr double kPhi = 1.61803398875;
     const double incA = kTwoPi * baseRateHz / fs;
     const double incB = kTwoPi * (baseRateHz * kPhi) / fs;
+    const double incPan = kTwoPi * panLfoRateHz / fs;
     const float minDelaySamples = 1.0f;
     const float maxDelaySamples = static_cast<float>(fs * 0.055);
 
@@ -117,6 +141,9 @@ void VoiceChannelStrip::processAndAccumulate(const float* monoIn,
         phaseB += incB;
         if (phaseB >= kTwoPi)
             phaseB -= kTwoPi;
+        panLfoPhase += incPan;
+        if (panLfoPhase >= kTwoPi)
+            panLfoPhase -= kTwoPi;
 
         const float osc = 0.5f + 0.28f * static_cast<float>(std::sin(phaseA))
                                + 0.22f * static_cast<float>(std::sin(phaseB));
@@ -146,8 +173,10 @@ void VoiceChannelStrip::processAndAccumulate(const float* monoIn,
         const float filtered = sanitizeSample(static_cast<float>(lpOut) * smoothedGain * breathGain);
         rmsAcc += static_cast<double>(filtered) * static_cast<double>(filtered);
 
-        // Equal-power stereo pan: [-1..+1] -> [0..pi/2]
-        const float theta = (smoothedPan + 1.0f) * static_cast<float>(kPi * 0.25);
+        // Equal-power stereo pan + subtle organic stereo drift: [-1..+1] -> [0..pi/2]
+        const float panMotion = 0.18f * h * static_cast<float>(std::sin(panLfoPhase));
+        const float effectivePan = std::clamp(smoothedPan + panMotion, -1.0f, 1.0f);
+        const float theta = (effectivePan + 1.0f) * static_cast<float>(kPi * 0.25);
         const float gL = std::cos(theta);
         const float gR = std::sin(theta);
 
