@@ -1,6 +1,7 @@
 #include "Ui/VoiceInspector.h"
 #include "Dsp/ScaleHarmonizer.h"
 #include "Plugin/ParameterIds.h"
+#include "Ui/Localization.h"
 #include "Ui/Theme.h"
 
 #include <algorithm>
@@ -12,7 +13,7 @@ namespace harmonizer::ui
 VoiceInspector::VoiceInspector(HarmonizerVProcessor& proc)
     : processor(proc)
 {
-    for (auto* btn : { &onBtn, &muteBtn, &soloBtn })
+    for (auto* btn : { &onBtn, &muteBtn, &soloBtn, &fixedBtn })
     {
         btn->setClickingTogglesState(true);
         addAndMakeVisible(btn);
@@ -22,9 +23,23 @@ VoiceInspector::VoiceInspector(HarmonizerVProcessor& proc)
     muteBtn.setColour(juce::TextButton::textColourOnId, Theme::textPrimary);
     soloBtn.setColour(juce::TextButton::buttonOnColourId, Theme::warnAccent);
     soloBtn.setColour(juce::TextButton::textColourOnId, Theme::bgCanvas);
+    fixedBtn.setTooltip("Lock voice to a fixed pedal note instead of scale interval");
 
     intervalKnob.setValueFormatter([this](double v)
     {
+        bool isFixed = false;
+        if (auto* rawFix = processor.getApvts().getRawParameterValue(params::voiceParamId(selectedVoice, params::vFixed)))
+            isFixed = rawFix->load(std::memory_order_relaxed) >= 0.5f;
+
+        if (isFixed)
+        {
+            static constexpr std::array<const char*, 12> kNotes = {
+                "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+            };
+            const int note = std::clamp(static_cast<int>(std::lround(v)), 0, 127);
+            return juce::String(kNotes[static_cast<size_t>(note % 12)]) + juce::String((note / 12) - 1);
+        }
+
         int scaleIdx = 0;
         if (auto* raw = processor.getApvts().getRawParameterValue(params::scale))
             scaleIdx = static_cast<int>(std::lround(raw->load(std::memory_order_relaxed)));
@@ -76,31 +91,42 @@ VoiceInspector::VoiceInspector(HarmonizerVProcessor& proc)
         return (v > 0.05 ? "+" : "") + juce::String(v, 1) + " dB";
     });
 
+    vibratoKnob.setValueFormatter([](double v)
+    {
+        return juce::String(std::lround(v)) + "%";
+    });
+
     humanizeKnob.setValueFormatter([](double v)
     {
         return juce::String(std::lround(v)) + "%";
     });
 
     for (auto* k : { &intervalKnob, &detuneKnob, &formantKnob, &delayKnob,
-                     &hpfKnob, &lpfKnob, &panKnob, &levelKnob, &humanizeKnob })
+                     &hpfKnob, &lpfKnob, &panKnob, &levelKnob, &vibratoKnob, &humanizeKnob })
     {
         addAndMakeVisible(k);
     }
 
     humanizeKnob.attach(processor.getApvts(), params::humanize);
     processor.getApvts().addParameterListener(params::scale, this);
+    for (int v = 0; v < dsp::kExposedVoices; ++v)
+        processor.getApvts().addParameterListener(params::voiceParamId(v, params::vFixed), this);
 
     bindSelectedVoice();
+    refreshLocalization();
 }
 
 VoiceInspector::~VoiceInspector()
 {
     processor.getApvts().removeParameterListener(params::scale, this);
+    for (int v = 0; v < dsp::kExposedVoices; ++v)
+        processor.getApvts().removeParameterListener(params::voiceParamId(v, params::vFixed), this);
     onAtt.reset();
     muteAtt.reset();
     soloAtt.reset();
+    fixedAtt.reset();
     for (auto* k : { &intervalKnob, &detuneKnob, &formantKnob, &delayKnob,
-                     &hpfKnob, &lpfKnob, &panKnob, &levelKnob, &humanizeKnob })
+                     &hpfKnob, &lpfKnob, &panKnob, &levelKnob, &vibratoKnob, &humanizeKnob })
     {
         k->detach();
     }
@@ -116,11 +142,22 @@ void VoiceInspector::parameterChanged(const juce::String& parameterID, float)
                 safe->intervalKnob.refreshDisplay();
         });
     }
+    else if (parameterID == params::voiceParamId(selectedVoice, params::vFixed))
+    {
+        juce::MessageManager::callAsync([safe = juce::Component::SafePointer<VoiceInspector>(this)]()
+        {
+            if (safe != nullptr)
+            {
+                safe->bindSelectedVoice();
+                safe->repaint();
+            }
+        });
+    }
 }
 
 void VoiceInspector::setSelectedVoice(int voiceIndex)
 {
-    const int clamped = std::clamp(voiceIndex, 0, dsp::kExposedVoicesV1 - 1);
+    const int clamped = std::clamp(voiceIndex, 0, dsp::kExposedVoices - 1);
     if (selectedVoice == clamped)
         return;
     selectedVoice = clamped;
@@ -134,6 +171,7 @@ void VoiceInspector::bindSelectedVoice()
     onAtt.reset();
     muteAtt.reset();
     soloAtt.reset();
+    fixedAtt.reset();
 
     intervalKnob.detach();
     detuneKnob.detach();
@@ -143,23 +181,33 @@ void VoiceInspector::bindSelectedVoice()
     lpfKnob.detach();
     panKnob.detach();
     levelKnob.detach();
+    vibratoKnob.detach();
 
     const auto col = Theme::getVoiceColour(selectedVoice);
     onBtn.setColour(juce::TextButton::buttonOnColourId, col);
     onBtn.setColour(juce::TextButton::textColourOnId, Theme::bgCanvas);
+    fixedBtn.setColour(juce::TextButton::buttonOnColourId, col);
+    fixedBtn.setColour(juce::TextButton::textColourOnId, Theme::bgCanvas);
 
     for (auto* k : { &intervalKnob, &detuneKnob, &formantKnob, &delayKnob,
-                     &hpfKnob, &lpfKnob, &panKnob, &levelKnob })
+                     &hpfKnob, &lpfKnob, &panKnob, &levelKnob, &vibratoKnob })
     {
         k->setAccentColour(col);
     }
 
     auto& apvts = processor.getApvts();
-    onAtt   = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, params::voiceParamId(selectedVoice, params::vEnabled), onBtn);
-    muteAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, params::voiceParamId(selectedVoice, params::vMute), muteBtn);
-    soloAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, params::voiceParamId(selectedVoice, params::vSolo), soloBtn);
+    onAtt    = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, params::voiceParamId(selectedVoice, params::vEnabled), onBtn);
+    muteAtt  = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, params::voiceParamId(selectedVoice, params::vMute), muteBtn);
+    soloAtt  = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, params::voiceParamId(selectedVoice, params::vSolo), soloBtn);
+    fixedAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, params::voiceParamId(selectedVoice, params::vFixed), fixedBtn);
 
-    intervalKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vInterval));
+    bool isFixed = false;
+    if (auto* rawFix = apvts.getRawParameterValue(params::voiceParamId(selectedVoice, params::vFixed)))
+        isFixed = rawFix->load(std::memory_order_relaxed) >= 0.5f;
+
+    intervalKnob.setTitle(tr(isFixed ? dsp::TextKey::KnobFixNote : dsp::TextKey::KnobInterval));
+    intervalKnob.setTooltip(tr(isFixed ? dsp::TextKey::KnobFixNoteTooltip : dsp::TextKey::KnobIntervalTooltip));
+    intervalKnob.attach(apvts, params::voiceParamId(selectedVoice, isFixed ? params::vFixedNote : params::vInterval));
     detuneKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vDetune));
     formantKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vFormant));
     delayKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vDelayMs));
@@ -167,39 +215,74 @@ void VoiceInspector::bindSelectedVoice()
     lpfKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vLpfHz));
     panKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vPan));
     levelKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vGainDb));
+    vibratoKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vVibrato));
+}
+
+void VoiceInspector::refreshLocalization()
+{
+    fixedBtn.setTooltip(tr(dsp::TextKey::FixBtnTooltip));
+
+    bool isFixed = false;
+    if (auto* rawFix = processor.getApvts().getRawParameterValue(params::voiceParamId(selectedVoice, params::vFixed)))
+        isFixed = rawFix->load(std::memory_order_relaxed) >= 0.5f;
+
+    intervalKnob.setTitle(tr(isFixed ? dsp::TextKey::KnobFixNote : dsp::TextKey::KnobInterval));
+    intervalKnob.setTooltip(tr(isFixed ? dsp::TextKey::KnobFixNoteTooltip : dsp::TextKey::KnobIntervalTooltip));
+
+    detuneKnob.setTitle(tr(dsp::TextKey::KnobDetune));
+    detuneKnob.setTooltip(tr(dsp::TextKey::KnobDetuneTooltip));
+    formantKnob.setTitle(tr(dsp::TextKey::KnobFormant));
+    formantKnob.setTooltip(tr(dsp::TextKey::KnobFormantTooltip));
+    delayKnob.setTitle(tr(dsp::TextKey::KnobDelay));
+    delayKnob.setTooltip(tr(dsp::TextKey::KnobDelayTooltip));
+    hpfKnob.setTitle(tr(dsp::TextKey::KnobHpf));
+    hpfKnob.setTooltip(tr(dsp::TextKey::KnobHpfTooltip));
+    lpfKnob.setTitle(tr(dsp::TextKey::KnobLpf));
+    lpfKnob.setTooltip(tr(dsp::TextKey::KnobLpfTooltip));
+    panKnob.setTitle(tr(dsp::TextKey::KnobPan));
+    panKnob.setTooltip(tr(dsp::TextKey::KnobPanTooltip));
+    levelKnob.setTitle(tr(dsp::TextKey::KnobLevel));
+    levelKnob.setTooltip(tr(dsp::TextKey::KnobLevelTooltip));
+    vibratoKnob.setTitle(tr(dsp::TextKey::KnobVib));
+    vibratoKnob.setTooltip(tr(dsp::TextKey::KnobVibTooltip));
+    humanizeKnob.setTitle(tr(dsp::TextKey::KnobHumanize));
+    humanizeKnob.setTooltip(tr(dsp::TextKey::KnobHumanizeTooltip));
+
+    repaint();
 }
 
 void VoiceInspector::resized()
 {
     auto r = getLocalBounds().reduced(14, 10);
 
-    // Left voice header + On/M/S buttons
+    // Left voice header + FIX toggle + On/M/S buttons
     auto leftCol = r.removeFromLeft(110);
-    leftCol.removeFromTop(24); // Title painted here
-    auto rowTop = leftCol.removeFromTop(26);
-    onBtn.setBounds(rowTop.withWidth(94));
-    leftCol.removeFromTop(6);
+    auto titleRow = leftCol.removeFromTop(22);
+    fixedBtn.setBounds(titleRow.removeFromRight(40).reduced(0, 1));
+    leftCol.removeFromTop(3);
+    onBtn.setBounds(leftCol.removeFromTop(25).withWidth(98));
+    leftCol.removeFromTop(5);
     auto rowBot = leftCol.removeFromTop(24);
-    muteBtn.setBounds(rowBot.removeFromLeft(44));
+    muteBtn.setBounds(rowBot.removeFromLeft(46));
     rowBot.removeFromLeft(6);
-    soloBtn.setBounds(rowBot.removeFromLeft(44));
+    soloBtn.setBounds(rowBot.removeFromLeft(46));
 
-    r.removeFromLeft(10);
+    r.removeFromLeft(8);
 
     // Right global Humanize knob
-    auto rightCol = r.removeFromRight(84);
-    humanizeKnob.setBounds(rightCol.reduced(4, 2));
+    auto rightCol = r.removeFromRight(80);
+    humanizeKnob.setBounds(rightCol.reduced(2, 2));
 
-    dividerBounds = r.removeFromRight(12).withSizeKeepingCentre(1, r.getHeight() - 16);
+    dividerBounds = r.removeFromRight(10).withSizeKeepingCentre(1, r.getHeight() - 16);
 
-    // 8 voice knobs evenly distributed
-    std::array<LabeledKnob*, 8> knobs = {
+    // 9 voice knobs evenly distributed
+    std::array<LabeledKnob*, 9> knobs = {
         &intervalKnob, &detuneKnob, &formantKnob, &delayKnob,
-        &hpfKnob, &lpfKnob, &panKnob, &levelKnob
+        &hpfKnob, &lpfKnob, &panKnob, &levelKnob, &vibratoKnob
     };
-    const int knobW = std::max(54, r.getWidth() / static_cast<int>(knobs.size()));
+    const int knobW = std::max(52, r.getWidth() / static_cast<int>(knobs.size()));
     for (auto* k : knobs)
-        k->setBounds(r.removeFromLeft(knobW).reduced(2, 2));
+        k->setBounds(r.removeFromLeft(knobW).reduced(1, 2));
 }
 
 void VoiceInspector::paint(juce::Graphics& g)
@@ -217,10 +300,11 @@ void VoiceInspector::paint(juce::Graphics& g)
     g.fillRoundedRectangle(juce::Rectangle<float>(card.getX() + 1.0f, card.getY() + 12.0f, 3.5f, card.getHeight() - 24.0f), 2.0f);
 
     // Selected voice label
-    const auto titleArea = getLocalBounds().reduced(14, 10).withWidth(104).withHeight(20);
+    const auto titleArea = getLocalBounds().reduced(14, 10).withWidth(68).withHeight(20);
     g.setColour(voiceCol);
     g.setFont(Theme::makeFont(12.5f, true));
-    g.drawFittedText("VOICE " + juce::String(selectedVoice + 1), titleArea, juce::Justification::centredLeft, 1);
+    g.drawFittedText(tr(dsp::TextKey::VoicePrefix) + juce::String(selectedVoice + 1),
+                     titleArea, juce::Justification::centredLeft, 1);
 
     // Subtle divider before Humanize
     g.setColour(Theme::borderSubtle);

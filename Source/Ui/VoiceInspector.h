@@ -19,6 +19,7 @@ public:
 
     void setSelectedVoice(int voiceIndex);
     int getSelectedVoice() const noexcept { return selectedVoice; }
+    void refreshLocalization();
 
     void resized() override;
     void paint(juce::Graphics& g) override;
@@ -33,10 +34,12 @@ private:
     juce::TextButton onBtn{ "ON" };
     juce::TextButton muteBtn{ "M" };
     juce::TextButton soloBtn{ "S" };
+    juce::TextButton fixedBtn{ "FIX" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> muteAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> soloAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> fixedAtt;
 
     LabeledKnob intervalKnob { "INTERVAL" };
     LabeledKnob detuneKnob   { "DETUNE" };
@@ -46,6 +49,7 @@ private:
     LabeledKnob lpfKnob      { "LPF" };
     LabeledKnob panKnob      { "PAN" };
     LabeledKnob levelKnob    { "LEVEL" };
+    LabeledKnob vibratoKnob  { "VIB" };
     LabeledKnob humanizeKnob { "HUMANIZE", Theme::liveAccent };
 
     juce::Rectangle<int> dividerBounds;

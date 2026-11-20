@@ -2,6 +2,9 @@ add_executable(HarmonizerV_Tests
     PitchTrackerTests.cpp
     ScaleHarmonizerTests.cpp
     TdPsolaTests.cpp
+    SnapshotBankTests.cpp
+    MidiControlMapTests.cpp
+    LocalizationTests.cpp
     HarmonizerEngineTests.cpp
 )
 

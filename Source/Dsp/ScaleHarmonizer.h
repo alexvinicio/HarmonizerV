@@ -33,6 +33,7 @@ public:
 
     int getLockedBaseMidi() const noexcept { return lockedBaseMidi; }
 
+    static float quantizeToScaleMidi(float detectedMidi, int key, ScaleType scale) noexcept;
     static std::string formatIntervalLabel(int intervalSteps, ScaleType scale);
     static const char* getKeyName(int keyIndex) noexcept;
     static const char* getScaleName(int scaleIndex) noexcept;

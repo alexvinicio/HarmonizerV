@@ -28,6 +28,7 @@ public:
                       int buttonX, int buttonY, int buttonW, int buttonH,
                       juce::ComboBox& box) override;
 
+    void positionComboBoxText(juce::ComboBox& box, juce::Label& label) override;
     juce::Font getComboBoxFont(juce::ComboBox& box) override;
 
     void drawPopupMenuBackground(juce::Graphics& g, int width, int height) override;
@@ -53,6 +54,8 @@ public:
                          juce::Colour accentColour = Theme::liveAccent);
 
     void setAccentColour(juce::Colour c);
+    void setTitle(const juce::String& newTitle);
+    void setTooltip(const juce::String& text);
     void setValueFormatter(std::function<juce::String(double)> formatter);
 
     void attach(juce::AudioProcessorValueTreeState& apvts, const juce::String& paramId);

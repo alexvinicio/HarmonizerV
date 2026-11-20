@@ -12,17 +12,24 @@ namespace harmonizer::dsp
 class TdPsolaVoice
 {
 public:
-    void prepare(double sampleRate);
+    void prepare(double sampleRate, int voiceIdx = 0, LiveBufferSize bufSize = LiveBufferSize::Fast256);
     void reset() noexcept;
 
+    void setLatencySamples(int newLatencySamples) noexcept
+    {
+        liveLatencySamples = std::max(64, newLatencySamples);
+        smoothedLookback = static_cast<double>(liveLatencySamples);
+    }
     int getLatencySamples() const noexcept { return liveLatencySamples; }
 
     float processSample(const PitchMarkDetector& markDetector,
                         int64_t currentSampleIndex,
                         float currentF0Hz,
-                        bool isVoiced,
+                        float voicingConfidence,
                         float targetShiftSemitones,
-                        float targetFormantSemitones) noexcept;
+                        float targetFormantSemitones,
+                        float glideMs,
+                        float naturalness) noexcept;
 
 private:
     struct Grain
@@ -34,18 +41,32 @@ private:
         double formantRatio = 1.0;
     };
 
+    double alignAnalysisCenterWsola(const PitchMarkDetector& markDetector,
+                                    double candidateMark,
+                                    double maxAllowedMark,
+                                    float voicingConfidence) noexcept;
+
     static constexpr int kGrainPoolSize = 32;
     std::array<Grain, kGrainPoolSize> grains{};
 
+    static constexpr int kTemplateLen = 9; // [-8..+8] step 2 samples
+    std::array<float, kTemplateLen> prevTemplate{};
+    bool hasPrevTemplate = false;
+
     double fs = 48000.0;
-    int liveLatencySamples = 512;
+    int voiceIndex = 0;
+    int liveLatencySamples = 256;
+    double smoothedLookback = 256.0;
+    double lookbackAlpha = 0.01;
 
     double nextSynthCenter = 0.0;
     bool synthInitialized = false;
 
-    double smoothedPitchRatio = 1.0;
+    double smoothedShiftSt = 0.0;
     double smoothedFormantRatio = 1.0;
-    double smoothAlpha = 0.01;
+    double formantSmoothAlpha = 0.01;
+    double lastGlideMs = 28.0;
+    double glideAlpha = 0.01;
 
     float voicedBlend = 0.0f;
     float blendAlpha = 0.01f;

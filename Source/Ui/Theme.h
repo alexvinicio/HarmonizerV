@@ -23,11 +23,15 @@ inline const juce::Colour studioAccent  { 0xFF8B5CF6 };
 inline const juce::Colour warnAccent    { 0xFFF59E0B };
 inline const juce::Colour muteAccent    { 0xFFEF4444 };
 
-inline const std::array<juce::Colour, 4> voiceColours = {
+inline const std::array<juce::Colour, 8> voiceColours = {
     juce::Colour{ 0xFF38BDF8 }, // V1 Cyan
     juce::Colour{ 0xFFA78BFA }, // V2 Lavender
     juce::Colour{ 0xFFFBBF24 }, // V3 Amber
-    juce::Colour{ 0xFFFB7185 }  // V4 Coral
+    juce::Colour{ 0xFFFB7185 }, // V4 Coral
+    juce::Colour{ 0xFF34D399 }, // V5 Mint
+    juce::Colour{ 0xFF60A5FA }, // V6 Sky
+    juce::Colour{ 0xFFF472B6 }, // V7 Pink
+    juce::Colour{ 0xFFFB923C }  // V8 Tangerine
 };
 
 inline juce::Colour getVoiceColour(int index) noexcept

@@ -1,7 +1,10 @@
 #pragma once
 
 #include "Dsp/HarmonizerEngine.h"
+#include "Plugin/LiveMidiController.h"
+#include "Plugin/ParameterIds.h"
 #include "Plugin/PresetManager.h"
+#include "Plugin/SnapshotManager.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <array>
@@ -32,7 +35,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.1; }
+    double getTailLengthSeconds() const override { return 0.6; }
 
     int getNumPrograms() override;
     int getCurrentProgram() override;
@@ -43,7 +46,12 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    juce::AudioProcessorParameter* getBypassParameter() const override { return apvts.getParameter(params::bypass); }
+
+    juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     juce::AudioProcessorValueTreeState& getApvts() noexcept { return apvts; }
+    SnapshotManager& getSnapshotManager() noexcept { return snapshotManager; }
+    LiveMidiController& getLiveMidiController() noexcept { return liveMidiController; }
     PresetManager& getPresetManager() noexcept { return presetManager; }
     dsp::TelemetrySnapshot getTelemetry() const noexcept { return engine.getTelemetry(); }
     int getLiveLatencySamples() const noexcept { return engine.getLiveLatencySamples(); }
@@ -60,6 +68,8 @@ private:
         std::atomic<float>* enabled = nullptr;
         std::atomic<float>* mute = nullptr;
         std::atomic<float>* solo = nullptr;
+        std::atomic<float>* fixed = nullptr;
+        std::atomic<float>* fixedNote = nullptr;
         std::atomic<float>* interval = nullptr;
         std::atomic<float>* detune = nullptr;
         std::atomic<float>* formant = nullptr;
@@ -68,20 +78,34 @@ private:
         std::atomic<float>* lpfHz = nullptr;
         std::atomic<float>* pan = nullptr;
         std::atomic<float>* gainDb = nullptr;
+        std::atomic<float>* vibrato = nullptr;
     };
 
+    juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
+    SnapshotManager snapshotManager;
+    LiveMidiController liveMidiController;
     PresetManager presetManager;
     dsp::HarmonizerEngine engine;
 
     std::atomic<float>* keyParam = nullptr;
     std::atomic<float>* scaleParam = nullptr;
+    std::atomic<float>* voiceBankParam = nullptr;
     std::atomic<float>* engineModeParam = nullptr;
+    std::atomic<float>* liveBufferParam = nullptr;
+    std::atomic<float>* harmonyModeParam = nullptr;
+    std::atomic<float>* snapshotParam = nullptr;
     std::atomic<float>* mixParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
     std::atomic<float>* humanizeParam = nullptr;
+    std::atomic<float>* inputTuneParam = nullptr;
+    std::atomic<float>* glideParam = nullptr;
+    std::atomic<float>* naturalParam = nullptr;
+    std::atomic<float>* deEssParam = nullptr;
+    std::atomic<float>* spaceParam = nullptr;
+    std::atomic<float>* bypassParam = nullptr;
 
-    std::array<VoiceAtomics, dsp::kExposedVoicesV1> voiceAtomics{};
+    std::array<VoiceAtomics, dsp::kExposedVoices> voiceAtomics{};
     std::atomic<double> currentSampleRate{ 48000.0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(HarmonizerVProcessor)

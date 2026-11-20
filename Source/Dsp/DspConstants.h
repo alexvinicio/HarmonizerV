@@ -10,6 +10,7 @@ namespace harmonizer::dsp
 
 inline constexpr int kMaxVoices = 8;
 inline constexpr int kExposedVoicesV1 = 4;
+inline constexpr int kExposedVoices = kMaxVoices;
 
 inline constexpr float kMinVocalHz = 75.0f;
 inline constexpr float kMaxVocalHz = 1100.0f;
@@ -23,11 +24,27 @@ enum class EngineMode : int
     Studio = 1
 };
 
+enum class HarmonyMode : int
+{
+    Auto = 0,
+    Midi = 1
+};
+
+enum class LiveBufferSize : int
+{
+    Ultra128 = 0, // ~2.7 ms @ 48 kHz (128 samples)
+    Fast256  = 1, // ~5.3 ms @ 48 kHz (256 samples)
+    Low384   = 2, // ~8.0 ms @ 48 kHz (384 samples)
+    Safe512  = 3  // ~10.7 ms @ 48 kHz (512 samples)
+};
+
 struct VoiceParams
 {
     bool enabled = false;
     bool mute = false;
     bool solo = false;
+    bool fixedPitch = false;        // false = diatonic interval, true = locked to fixedMidiNote
+    int fixedMidiNote = 60;         // 36..96 (C2..C7)
     int intervalSteps = 2;       // Diatonic steps (-14..+14)
     float detuneCents = 0.0f;    // -50..+50 cents
     float formantSemitones = 0.0f; // -12..+12 semitones
@@ -36,16 +53,26 @@ struct VoiceParams
     float lpfHz = 16000.0f;      // 2000..18000 Hz
     float pan = 0.0f;            // -1..+1
     float gainDb = -6.0f;        // -60..+6 dB
+    float vibratoDepth = 0.0f;   // 0..1 natural staggered vocal vibrato (up to +/- 30 ct)
 };
 
 struct GlobalParams
 {
     int key = 0;                 // 0..11 (C..B)
     int scaleIndex = 0;          // 0..8
+    int activeVoiceBankCount = 4;// 4 or 8 (4V / 8V mode)
     EngineMode engineMode = EngineMode::Live;
+    HarmonyMode harmonyMode = HarmonyMode::Auto;
+    LiveBufferSize liveBufferSize = LiveBufferSize::Fast256;
     float mix = 0.45f;           // 0..1
     float outputGainDb = 0.0f;   // -24..+12 dB
     float humanize = 0.20f;      // 0..1
+    float inputTuneAmount = 0.0f;// 0..1 pitch correction on lead input
+    float glideMs = 28.0f;       // 0..150 ms pitch transition glide
+    float naturalness = 0.35f;   // 0..1 formant follow + high-band vocal air
+    float deEssAmount = 0.35f;   // 0..1 wet harmony bus sibilance control
+    float spaceAmount = 0.18f;   // 0..1 wet harmony studio vocal space
+    bool bypass = false;
 };
 
 struct TelemetrySnapshot
@@ -58,10 +85,17 @@ struct TelemetrySnapshot
     float detectedMidi = 60.0f;
     float voicedClarity = 0.0f;
     bool isVoiced = false;
+    bool bypassed = false;
     int activeLatencySamples = 0;
+    int activeVoiceBankCount = 4;
     EngineMode activeMode = EngineMode::Live;
+    HarmonyMode activeHarmonyMode = HarmonyMode::Auto;
+    float inputTuneCorrectionCents = 0.0f;
+    float deEssReductionDb = 0.0f;
     std::array<float, kMaxVoices> voiceRms{};
     std::array<float, kMaxVoices> voiceTargetSemitones{};
+    std::array<int, kMaxVoices> voiceMidiNote{};
+    std::array<bool, kMaxVoices> voiceMidiActive{};
 };
 
 inline float semitonesToRatio(float semitones) noexcept
@@ -114,10 +148,29 @@ inline float sanitizeSample(float x) noexcept
     return std::clamp(x, -8.0f, 8.0f);
 }
 
-inline int computeLiveLatencySamples(double sampleRate) noexcept
+inline float softCeiling(float x) noexcept
+{
+    const float clean = sanitizeSample(x);
+    const float a = std::abs(clean);
+    if (a <= 0.80f)
+        return clean;
+    const float sign = (clean >= 0.0f) ? 1.0f : -1.0f;
+    return sign * (0.80f + 0.18f * std::tanh((a - 0.80f) / 0.18f));
+}
+
+inline int computeLiveLatencySamples(double sampleRate, LiveBufferSize bufSize = LiveBufferSize::Fast256) noexcept
 {
     const double sr = std::max(8000.0, sampleRate);
-    return std::max(128, static_cast<int>(std::llround(sr * (512.0 / 48000.0))));
+    double baseAt48k = 256.0;
+    switch (bufSize)
+    {
+        case LiveBufferSize::Ultra128: baseAt48k = 128.0; break;
+        case LiveBufferSize::Fast256:  baseAt48k = 256.0; break;
+        case LiveBufferSize::Low384:   baseAt48k = 384.0; break;
+        case LiveBufferSize::Safe512:  baseAt48k = 512.0; break;
+        default:                       baseAt48k = 256.0; break;
+    }
+    return std::max(64, static_cast<int>(std::llround(sr * (baseAt48k / 48000.0))));
 }
 
 } // namespace harmonizer::dsp

@@ -10,7 +10,8 @@
 namespace harmonizer::ui
 {
 
-class HarmonyStage final : public juce::Component
+class HarmonyStage final : public juce::Component,
+                           public juce::SettableTooltipClient
 {
 public:
     explicit HarmonyStage(HarmonizerVProcessor& proc);
@@ -18,6 +19,7 @@ public:
     void setSelectedVoice(int voiceIndex);
     int getSelectedVoice() const noexcept { return selectedVoice; }
     void updateTelemetry(const dsp::TelemetrySnapshot& snap);
+    void refreshLocalization();
 
     std::function<void(int)> onVoiceSelected;
 
@@ -27,10 +29,23 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
     void mouseDoubleClick(const juce::MouseEvent& e) override;
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
 private:
+    enum class HoverZone
+    {
+        None = 0,
+        VoicePill,
+        BankToggle,
+        VoicingBtn,
+        UndoBtn,
+        RedoBtn,
+        SnapPill,
+        Orb
+    };
     juce::Rectangle<float> getStageArea() const noexcept;
     juce::Point<float> voiceToPoint(int voiceIndex) const noexcept;
     float intervalToY(int interval) const noexcept;
@@ -44,15 +59,32 @@ private:
     void endDragVoice();
     float getParamPlain(const juce::String& id, float fallback = 0.0f) const noexcept;
     void setParamPlain(const juce::String& id, float plainVal, bool notifyGesture);
+    void showSnapshotContextMenu(int slotIndex);
+    void showVoicingMenu();
+    void updateHeaderLayout() noexcept;
+    int getVisibleVoiceCount() const noexcept;
+    static juce::String formatMidiNoteName(int note);
 
     HarmonizerVProcessor& processor;
     dsp::TelemetrySnapshot latestSnap{};
     int selectedVoice = 0;
+    int lastVisibleVoices = 4;
 
     int draggingVoice = -1;
+    bool draggingFixed = false;
     bool gestureActive = false;
 
-    std::array<juce::Rectangle<float>, dsp::kExposedVoicesV1> pillRects{};
+    HoverZone hoverZone = HoverZone::None;
+    int hoverIndex = -1;
+
+    std::array<juce::Rectangle<float>, dsp::kMaxVoices> pillRects{};
+    juce::Rectangle<float> bankToggleRect{};
+    juce::Rectangle<float> voicingBtnRect{};
+    std::array<juce::Rectangle<float>, dsp::kNumSnapshots> snapPillRects{};
+    juce::Rectangle<float> undoBtnRect{};
+    juce::Rectangle<float> redoBtnRect{};
+    juce::Rectangle<float> snapLabelRect{};
+    juce::Rectangle<float> hintRect{};
 };
 
 } // namespace harmonizer::ui

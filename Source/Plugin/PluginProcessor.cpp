@@ -21,11 +21,15 @@ struct DefaultVoiceInit
     float gainDb;
 };
 
-constexpr std::array<DefaultVoiceInit, dsp::kExposedVoicesV1> kDefaultVoices = {{
+constexpr std::array<DefaultVoiceInit, dsp::kExposedVoices> kDefaultVoices = {{
     { true,  +2,  4.0f, 110.0f, 14000.0f, -35.0f, -5.0f },
     { true,  +4,  9.0f, 130.0f, 13500.0f, +35.0f, -6.0f },
     { false, -2, 12.0f, 100.0f, 14000.0f, -65.0f, -8.0f },
-    { false, +7, 16.0f, 160.0f, 15000.0f, +65.0f, -8.0f }
+    { false, +7, 16.0f, 160.0f, 15000.0f, +65.0f, -8.0f },
+    { false, -4, 10.0f, 100.0f, 12500.0f, -50.0f, -8.0f },
+    { false, +5, 14.0f, 150.0f, 13500.0f, +50.0f, -8.0f },
+    { false, -7,  6.0f,  85.0f, 10500.0f, -80.0f, -9.0f },
+    { false, +9, 22.0f, 220.0f, 16000.0f, +80.0f, -9.5f }
 }};
 } // namespace
 
@@ -33,30 +37,45 @@ HarmonizerVProcessor::HarmonizerVProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts(*this, nullptr, "HarmonizerVState", createParameterLayout()),
-      presetManager(apvts)
+      apvts(*this, &undoManager, "HarmonizerVState", createParameterLayout()),
+      snapshotManager(apvts),
+      liveMidiController(apvts, snapshotManager),
+      presetManager(apvts, snapshotManager, liveMidiController)
 {
-    keyParam        = apvts.getRawParameterValue(params::key);
-    scaleParam      = apvts.getRawParameterValue(params::scale);
-    engineModeParam = apvts.getRawParameterValue(params::engineMode);
-    mixParam        = apvts.getRawParameterValue(params::mix);
-    outputGainParam = apvts.getRawParameterValue(params::outputGain);
-    humanizeParam   = apvts.getRawParameterValue(params::humanize);
+    keyParam         = apvts.getRawParameterValue(params::key);
+    scaleParam       = apvts.getRawParameterValue(params::scale);
+    voiceBankParam   = apvts.getRawParameterValue(params::voiceBank);
+    engineModeParam  = apvts.getRawParameterValue(params::engineMode);
+    liveBufferParam  = apvts.getRawParameterValue(params::liveBuffer);
+    harmonyModeParam = apvts.getRawParameterValue(params::harmonyMode);
+    snapshotParam    = apvts.getRawParameterValue(params::snapshot);
+    mixParam         = apvts.getRawParameterValue(params::mix);
+    outputGainParam  = apvts.getRawParameterValue(params::outputGain);
+    humanizeParam    = apvts.getRawParameterValue(params::humanize);
+    inputTuneParam   = apvts.getRawParameterValue(params::inputTune);
+    glideParam       = apvts.getRawParameterValue(params::glideMs);
+    naturalParam    = apvts.getRawParameterValue(params::naturalness);
+    deEssParam      = apvts.getRawParameterValue(params::deEssAmount);
+    spaceParam      = apvts.getRawParameterValue(params::spaceAmount);
+    bypassParam     = apvts.getRawParameterValue(params::bypass);
 
-    for (int v = 0; v < dsp::kExposedVoicesV1; ++v)
+    for (int v = 0; v < dsp::kExposedVoices; ++v)
     {
         auto& va = voiceAtomics[static_cast<size_t>(v)];
-        va.enabled  = apvts.getRawParameterValue(params::voiceParamId(v, params::vEnabled));
-        va.mute     = apvts.getRawParameterValue(params::voiceParamId(v, params::vMute));
-        va.solo     = apvts.getRawParameterValue(params::voiceParamId(v, params::vSolo));
-        va.interval = apvts.getRawParameterValue(params::voiceParamId(v, params::vInterval));
-        va.detune   = apvts.getRawParameterValue(params::voiceParamId(v, params::vDetune));
-        va.formant  = apvts.getRawParameterValue(params::voiceParamId(v, params::vFormant));
-        va.delayMs  = apvts.getRawParameterValue(params::voiceParamId(v, params::vDelayMs));
-        va.hpfHz    = apvts.getRawParameterValue(params::voiceParamId(v, params::vHpfHz));
-        va.lpfHz    = apvts.getRawParameterValue(params::voiceParamId(v, params::vLpfHz));
-        va.pan      = apvts.getRawParameterValue(params::voiceParamId(v, params::vPan));
-        va.gainDb   = apvts.getRawParameterValue(params::voiceParamId(v, params::vGainDb));
+        va.enabled   = apvts.getRawParameterValue(params::voiceParamId(v, params::vEnabled));
+        va.mute      = apvts.getRawParameterValue(params::voiceParamId(v, params::vMute));
+        va.solo      = apvts.getRawParameterValue(params::voiceParamId(v, params::vSolo));
+        va.fixed     = apvts.getRawParameterValue(params::voiceParamId(v, params::vFixed));
+        va.fixedNote = apvts.getRawParameterValue(params::voiceParamId(v, params::vFixedNote));
+        va.interval  = apvts.getRawParameterValue(params::voiceParamId(v, params::vInterval));
+        va.detune    = apvts.getRawParameterValue(params::voiceParamId(v, params::vDetune));
+        va.formant   = apvts.getRawParameterValue(params::voiceParamId(v, params::vFormant));
+        va.delayMs   = apvts.getRawParameterValue(params::voiceParamId(v, params::vDelayMs));
+        va.hpfHz     = apvts.getRawParameterValue(params::voiceParamId(v, params::vHpfHz));
+        va.lpfHz     = apvts.getRawParameterValue(params::voiceParamId(v, params::vLpfHz));
+        va.pan       = apvts.getRawParameterValue(params::voiceParamId(v, params::vPan));
+        va.gainDb    = apvts.getRawParameterValue(params::voiceParamId(v, params::vGainDb));
+        va.vibrato   = apvts.getRawParameterValue(params::voiceParamId(v, params::vVibrato));
     }
 }
 
@@ -84,6 +103,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout HarmonizerVProcessor::create
     p.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ params::engineMode, 1 }, "Engine Mode", engineChoices, 0));
 
+    juce::StringArray liveBufChoices{ "2.7 ms (128)", "5.3 ms (256)", "8.0 ms (384)", "10.7 ms (512)" };
+    p.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ params::liveBuffer, 1 }, "Live Buffer", liveBufChoices, 1));
+
+    juce::StringArray harmonyChoices{ "Auto", "MIDI" };
+    p.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ params::harmonyMode, 1 }, "Harmony Mode", harmonyChoices, 0));
+
+    juce::StringArray snapshotChoices{ "A", "B", "C", "D" };
+    p.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ params::snapshot, 1 }, "Snapshot", snapshotChoices, 0));
+
     p.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ params::mix, 1 }, "Mix",
         juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 40.0f,
@@ -99,7 +130,39 @@ juce::AudioProcessorValueTreeState::ParameterLayout HarmonizerVProcessor::create
         juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 20.0f,
         juce::AudioParameterFloatAttributes().withLabel("%")));
 
-    for (int v = 0; v < dsp::kExposedVoicesV1; ++v)
+    p.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ params::inputTune, 1 }, "Input Tune",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 0.5f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel("%")));
+
+    p.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ params::glideMs, 1 }, "Glide",
+        juce::NormalisableRange<float>(0.0f, 150.0f, 0.5f, 0.5f), 28.0f,
+        juce::AudioParameterFloatAttributes().withLabel("ms")));
+
+    p.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ params::naturalness, 1 }, "Natural",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 0.5f), 35.0f,
+        juce::AudioParameterFloatAttributes().withLabel("%")));
+
+    p.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ params::deEssAmount, 1 }, "De-Ess",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 0.5f), 35.0f,
+        juce::AudioParameterFloatAttributes().withLabel("%")));
+
+    p.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ params::spaceAmount, 1 }, "Space",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 0.5f), 18.0f,
+        juce::AudioParameterFloatAttributes().withLabel("%")));
+
+    p.push_back(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID{ params::bypass, 1 }, "Bypass", false));
+
+    juce::StringArray voiceBankChoices{ "4V", "8V" };
+    p.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ params::voiceBank, 1 }, "Voice Bank", voiceBankChoices, 0));
+
+    for (int v = 0; v < dsp::kExposedVoices; ++v)
     {
         const auto& def = kDefaultVoices[static_cast<size_t>(v)];
         const juce::String prefix = "V" + juce::String(v + 1) + " ";
@@ -115,6 +178,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout HarmonizerVProcessor::create
         p.push_back(std::make_unique<juce::AudioParameterBool>(
             juce::ParameterID{ params::voiceParamId(v, params::vSolo), 1 },
             prefix + "Solo", false));
+
+        p.push_back(std::make_unique<juce::AudioParameterBool>(
+            juce::ParameterID{ params::voiceParamId(v, params::vFixed), 1 },
+            prefix + "Fixed Note Mode", false));
+
+        p.push_back(std::make_unique<juce::AudioParameterInt>(
+            juce::ParameterID{ params::voiceParamId(v, params::vFixedNote), 1 },
+            prefix + "Fixed Note", 36, 96, 60));
 
         p.push_back(std::make_unique<juce::AudioParameterInt>(
             juce::ParameterID{ params::voiceParamId(v, params::vInterval), 1 },
@@ -161,6 +232,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout HarmonizerVProcessor::create
             prefix + "Level",
             juce::NormalisableRange<float>(-60.0f, 6.0f, 0.1f, 2.0f), def.gainDb,
             juce::AudioParameterFloatAttributes().withLabel("dB")));
+
+        p.push_back(std::make_unique<juce::AudioParameterFloat>(
+            juce::ParameterID{ params::voiceParamId(v, params::vVibrato), 1 },
+            prefix + "Vibrato",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 0.5f), 0.0f,
+            juce::AudioParameterFloatAttributes().withLabel("%")));
     }
 
     return { p.begin(), p.end() };
@@ -184,7 +261,8 @@ bool HarmonizerVProcessor::isBusesLayoutSupported(const BusesLayout& layouts) co
 void HarmonizerVProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     currentSampleRate.store(sampleRate, std::memory_order_relaxed);
-    engine.prepare(sampleRate, std::max(64, samplesPerBlock));
+    const int liveBufIdx = std::clamp(static_cast<int>(std::lround(liveBufferParam->load(std::memory_order_relaxed))), 0, 3);
+    engine.prepare(sampleRate, std::max(64, samplesPerBlock), static_cast<dsp::LiveBufferSize>(liveBufIdx));
     int dummy = 0;
     engine.consumeLatencyChanged(dummy);
     setLatencySamples(engine.getActiveLatencySamples());
@@ -195,9 +273,32 @@ void HarmonizerVProcessor::releaseResources()
     engine.reset();
 }
 
-void HarmonizerVProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void HarmonizerVProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
+
+    for (const auto metadata : midiMessages)
+    {
+        const auto msg = metadata.getMessage();
+        if (liveMidiController.processMidiMessageOnAudioThread(msg))
+            continue;
+
+        if (msg.isNoteOn())
+            engine.handleNoteOn(msg.getNoteNumber(), msg.getFloatVelocity());
+        else if (msg.isNoteOff())
+            engine.handleNoteOff(msg.getNoteNumber());
+        else if (msg.isSustainPedalOn())
+            engine.handleSustainPedal(true);
+        else if (msg.isSustainPedalOff())
+            engine.handleSustainPedal(false);
+        else if (msg.isPitchWheel())
+        {
+            const float bendSt = (static_cast<float>(msg.getPitchWheelValue() - 8192) / 8192.0f) * 2.0f;
+            engine.handlePitchBend(bendSt);
+        }
+        else if (msg.isAllNotesOff() || msg.isAllSoundOff())
+            engine.handleAllNotesOff();
+    }
 
     const int numSamples = buffer.getNumSamples();
     if (numSamples <= 0)
@@ -213,23 +314,37 @@ void HarmonizerVProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     }
 
     dsp::GlobalParams gp;
-    gp.key          = static_cast<int>(std::lround(keyParam->load(std::memory_order_relaxed)));
-    gp.scaleIndex   = static_cast<int>(std::lround(scaleParam->load(std::memory_order_relaxed)));
-    gp.engineMode   = (engineModeParam->load(std::memory_order_relaxed) >= 0.5f)
-                        ? dsp::EngineMode::Studio
-                        : dsp::EngineMode::Live;
-    gp.mix          = mixParam->load(std::memory_order_relaxed) * 0.01f;
-    gp.outputGainDb = outputGainParam->load(std::memory_order_relaxed);
-    gp.humanize     = humanizeParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.key                  = static_cast<int>(std::lround(keyParam->load(std::memory_order_relaxed)));
+    gp.scaleIndex           = static_cast<int>(std::lround(scaleParam->load(std::memory_order_relaxed)));
+    gp.activeVoiceBankCount = (voiceBankParam->load(std::memory_order_relaxed) >= 0.5f) ? 8 : 4;
+    gp.engineMode           = (engineModeParam->load(std::memory_order_relaxed) >= 0.5f)
+                                ? dsp::EngineMode::Studio
+                                : dsp::EngineMode::Live;
+    const int liveBufIdx = std::clamp(static_cast<int>(std::lround(liveBufferParam->load(std::memory_order_relaxed))), 0, 3);
+    gp.liveBufferSize  = static_cast<dsp::LiveBufferSize>(liveBufIdx);
+    gp.harmonyMode     = (harmonyModeParam->load(std::memory_order_relaxed) >= 0.5f)
+                           ? dsp::HarmonyMode::Midi
+                           : dsp::HarmonyMode::Auto;
+    gp.mix             = mixParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.outputGainDb    = outputGainParam->load(std::memory_order_relaxed);
+    gp.humanize        = humanizeParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.inputTuneAmount = inputTuneParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.glideMs         = glideParam->load(std::memory_order_relaxed);
+    gp.naturalness  = naturalParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.deEssAmount  = deEssParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.spaceAmount  = spaceParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.bypass       = bypassParam->load(std::memory_order_relaxed) >= 0.5f;
 
     std::array<dsp::VoiceParams, dsp::kMaxVoices> vp{};
-    for (int v = 0; v < dsp::kExposedVoicesV1; ++v)
+    for (int v = 0; v < dsp::kExposedVoices; ++v)
     {
         const auto& va = voiceAtomics[static_cast<size_t>(v)];
         auto& dst = vp[static_cast<size_t>(v)];
         dst.enabled          = va.enabled->load(std::memory_order_relaxed) >= 0.5f;
         dst.mute             = va.mute->load(std::memory_order_relaxed) >= 0.5f;
         dst.solo             = va.solo->load(std::memory_order_relaxed) >= 0.5f;
+        dst.fixedPitch       = va.fixed->load(std::memory_order_relaxed) >= 0.5f;
+        dst.fixedMidiNote    = static_cast<int>(std::lround(va.fixedNote->load(std::memory_order_relaxed)));
         dst.intervalSteps    = static_cast<int>(std::lround(va.interval->load(std::memory_order_relaxed)));
         dst.detuneCents      = va.detune->load(std::memory_order_relaxed);
         dst.formantSemitones = va.formant->load(std::memory_order_relaxed);
@@ -238,6 +353,7 @@ void HarmonizerVProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
         dst.lpfHz            = va.lpfHz->load(std::memory_order_relaxed);
         dst.pan              = va.pan->load(std::memory_order_relaxed) * 0.01f;
         dst.gainDb           = va.gainDb->load(std::memory_order_relaxed);
+        dst.vibratoDepth     = va.vibrato->load(std::memory_order_relaxed) * 0.01f;
     }
 
     const float* inPtrs[2] = {
@@ -287,6 +403,8 @@ const juce::String HarmonizerVProcessor::getProgramName(int index)
 void HarmonizerVProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    snapshotManager.writeToStateTree(state);
+    liveMidiController.writeToStateTree(state);
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     if (xml != nullptr)
         copyXmlToBinary(*xml, destData);
@@ -296,7 +414,25 @@ void HarmonizerVProcessor::setStateInformation(const void* data, int sizeInBytes
 {
     std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
     if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType()))
-        apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+    {
+        auto tree = juce::ValueTree::fromXml(*xmlState);
+        if (tree.isValid() && tree.hasType(apvts.state.getType()))
+        {
+            auto snapshotsNode = tree.getChildWithName("SNAPSHOTS");
+            if (snapshotsNode.isValid())
+                tree.removeChild(snapshotsNode, nullptr);
+
+            auto midiMapNode = tree.getChildWithName("MIDIMAP");
+            if (midiMapNode.isValid())
+                tree.removeChild(midiMapNode, nullptr);
+
+            snapshotManager.beginExternalStateLoad();
+            apvts.replaceState(tree);
+            snapshotManager.loadFromStateTree(snapshotsNode);
+            liveMidiController.loadFromStateTree(midiMapNode);
+            snapshotManager.endExternalStateLoad();
+        }
+    }
 }
 
 juce::AudioProcessorEditor* HarmonizerVProcessor::createEditor()

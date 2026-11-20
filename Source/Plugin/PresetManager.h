@@ -9,6 +9,9 @@
 namespace harmonizer
 {
 
+class SnapshotManager;
+class LiveMidiController;
+
 struct PresetEntry
 {
     juce::String name;
@@ -19,13 +22,16 @@ struct PresetEntry
 class PresetManager
 {
 public:
-    explicit PresetManager(juce::AudioProcessorValueTreeState& state);
+    PresetManager(juce::AudioProcessorValueTreeState& state,
+                  SnapshotManager& snapshots,
+                  LiveMidiController& liveMidi);
 
     void refreshPresets();
     const std::vector<PresetEntry>& getPresets() const noexcept { return presets; }
     int getNumFactoryPresets() const noexcept { return numFactoryPresets; }
 
     void loadPreset(int index);
+    void applyVoicingPreset(int voicingIndex);
     bool saveUserPreset(const juce::String& name);
 
     int getCurrentPresetIndex() const noexcept { return currentIndex; }
@@ -38,6 +44,8 @@ private:
     void setParamValue(const juce::String& id, float plainValue);
 
     juce::AudioProcessorValueTreeState& apvts;
+    SnapshotManager& snapshotManager;
+    LiveMidiController& liveMidiController;
     std::vector<PresetEntry> presets;
     int numFactoryPresets = 7;
     int currentIndex = 0;

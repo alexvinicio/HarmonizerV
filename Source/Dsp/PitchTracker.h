@@ -13,6 +13,7 @@ struct PitchEstimate
     float frequencyHz = 0.0f;
     float midiNote = 60.0f;
     float clarity = 0.0f;
+    float voicingConfidence = 0.0f;
     bool isVoiced = false;
 };
 
@@ -26,6 +27,7 @@ public:
     void processBlock(const float* samples, int numSamples) noexcept;
 
     PitchEstimate getEstimate() const noexcept { return currentEstimate; }
+    float getInstantHz() const noexcept { return instantValidHz; }
     float getSmoothedValidHz() const noexcept { return smoothedValidHz; }
 
 private:
@@ -57,7 +59,12 @@ private:
     int medianWriteIdx = 0;
     int unvoicedFrames = 0;
 
+    bool voicedState = false;
+    int holdHops = 6;
+    int holdCounter = 0;
+
     PitchEstimate currentEstimate{};
+    float instantValidHz = 220.0f;
     float smoothedValidHz = 220.0f;
 };
 

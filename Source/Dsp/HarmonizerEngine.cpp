@@ -6,32 +6,40 @@
 namespace harmonizer::dsp
 {
 
-void HarmonizerEngine::prepare(double sampleRate, int maxBlockSize)
+void HarmonizerEngine::prepare(double sampleRate, int maxBlockSize, LiveBufferSize initialLiveBuffer)
 {
     fs = std::max(8000.0, sampleRate);
     maxChunkSize = std::max(64, maxBlockSize);
+    activeLiveBuffer = initialLiveBuffer;
+    pendingLiveBuffer = initialLiveBuffer;
 
     pitchTracker.prepare(fs);
     scaleHarmonizer.reset();
     pitchMarkDetector.prepare(fs);
+    midiController.prepare(fs, kExposedVoicesV1);
+
+    inputTunerLive.prepare(fs, kMaxVoices, initialLiveBuffer);
+    inputTunerStudio.prepare(fs, maxChunkSize);
 
     for (int v = 0; v < kMaxVoices; ++v)
     {
-        liveVoices[static_cast<size_t>(v)].prepare(fs);
+        liveVoices[static_cast<size_t>(v)].prepare(fs, v, initialLiveBuffer);
         studioVoices[static_cast<size_t>(v)].prepare(fs, maxChunkSize);
         channelStrips[static_cast<size_t>(v)].prepare(fs, v);
         voiceTailRemaining[static_cast<size_t>(v)] = 0;
     }
+    harmonyBusFx.prepare(fs);
 
-    liveLatencySamples = liveVoices[0].getLatencySamples();
+    liveLatencySamples = computeLiveLatencySamples(fs, activeLiveBuffer);
     studioLatencySamples = studioVoices[0].getLatencySamples();
     activeLatencySamples = (activeMode == EngineMode::Live) ? liveLatencySamples : studioLatencySamples;
 
-    const int maxLat = std::max(liveLatencySamples, studioLatencySamples);
+    const int maxLat = std::max(computeLiveLatencySamples(fs, LiveBufferSize::Safe512), studioLatencySamples);
     dryDelayL.prepare(maxLat + maxChunkSize + 256);
     dryDelayR.prepare(maxLat + maxChunkSize + 256);
 
     monoInBuf.assign(static_cast<size_t>(maxChunkSize), 0.0f);
+    tunedLeadBuf.assign(static_cast<size_t>(maxChunkSize), 0.0f);
     voiceOutBuf.assign(static_cast<size_t>(maxChunkSize), 0.0f);
     wetBusL.assign(static_cast<size_t>(maxChunkSize), 0.0f);
     wetBusR.assign(static_cast<size_t>(maxChunkSize), 0.0f);
@@ -54,6 +62,10 @@ void HarmonizerEngine::reset() noexcept
     pitchTracker.reset();
     scaleHarmonizer.reset();
     pitchMarkDetector.reset();
+    midiController.reset();
+
+    inputTunerLive.reset();
+    inputTunerStudio.reset();
 
     for (int v = 0; v < kMaxVoices; ++v)
     {
@@ -65,11 +77,16 @@ void HarmonizerEngine::reset() noexcept
 
     dryDelayL.reset();
     dryDelayR.reset();
+    harmonyBusFx.reset();
 
     switchState = SwitchState::Stable;
     fadePos = 0;
     smoothedMix = 0.45f;
     smoothedOutGain = 1.0f;
+    smoothedCorrectionSt = 0.0f;
+    smoothedTuneBlend = 0.0f;
+    smoothedBusTrim = 1.0f;
+    smoothedBypassWet = 1.0f;
     firstBlockAfterReset = true;
 
     telemetry.inputRms.store(0.0f, std::memory_order_relaxed);
@@ -78,8 +95,16 @@ void HarmonizerEngine::reset() noexcept
     telemetry.outputPeakR.store(0.0f, std::memory_order_relaxed);
     telemetry.detectedHz.store(0.0f, std::memory_order_relaxed);
     telemetry.isVoiced.store(false, std::memory_order_relaxed);
+    telemetry.bypassed.store(false, std::memory_order_relaxed);
+    telemetry.activeVoiceBankCount.store(4, std::memory_order_relaxed);
+    telemetry.inputTuneCorrectionCents.store(0.0f, std::memory_order_relaxed);
+    telemetry.deEssReductionDb.store(0.0f, std::memory_order_relaxed);
     for (int v = 0; v < kMaxVoices; ++v)
+    {
         telemetry.voiceRms[static_cast<size_t>(v)].store(0.0f, std::memory_order_relaxed);
+        telemetry.voiceMidiNote[static_cast<size_t>(v)].store(-1, std::memory_order_relaxed);
+        telemetry.voiceMidiActive[static_cast<size_t>(v)].store(false, std::memory_order_relaxed);
+    }
 }
 
 bool HarmonizerEngine::consumeLatencyChanged(int& outNewLatencySamples) noexcept
@@ -103,12 +128,19 @@ TelemetrySnapshot HarmonizerEngine::getTelemetry() const noexcept
     snap.detectedMidi = telemetry.detectedMidi.load(std::memory_order_relaxed);
     snap.voicedClarity = telemetry.voicedClarity.load(std::memory_order_relaxed);
     snap.isVoiced = telemetry.isVoiced.load(std::memory_order_relaxed);
+    snap.bypassed = telemetry.bypassed.load(std::memory_order_relaxed);
     snap.activeLatencySamples = telemetry.activeLatencySamples.load(std::memory_order_relaxed);
+    snap.activeVoiceBankCount = telemetry.activeVoiceBankCount.load(std::memory_order_relaxed);
     snap.activeMode = static_cast<EngineMode>(telemetry.activeMode.load(std::memory_order_relaxed));
+    snap.activeHarmonyMode = static_cast<HarmonyMode>(telemetry.activeHarmonyMode.load(std::memory_order_relaxed));
+    snap.inputTuneCorrectionCents = telemetry.inputTuneCorrectionCents.load(std::memory_order_relaxed);
+    snap.deEssReductionDb = telemetry.deEssReductionDb.load(std::memory_order_relaxed);
     for (int v = 0; v < kMaxVoices; ++v)
     {
         snap.voiceRms[static_cast<size_t>(v)] = telemetry.voiceRms[static_cast<size_t>(v)].load(std::memory_order_relaxed);
         snap.voiceTargetSemitones[static_cast<size_t>(v)] = telemetry.voiceTargetSemitones[static_cast<size_t>(v)].load(std::memory_order_relaxed);
+        snap.voiceMidiNote[static_cast<size_t>(v)] = telemetry.voiceMidiNote[static_cast<size_t>(v)].load(std::memory_order_relaxed);
+        snap.voiceMidiActive[static_cast<size_t>(v)] = telemetry.voiceMidiActive[static_cast<size_t>(v)].load(std::memory_order_relaxed);
     }
     return snap;
 }
@@ -139,11 +171,26 @@ void HarmonizerEngine::processBlock(const float* const* inChannels,
     {
         const int chunk = std::min(maxChunkSize, numSamples - offset);
 
-        if (switchState == SwitchState::Stable && globalParams.engineMode != activeMode)
+        if (switchState == SwitchState::Stable)
         {
-            pendingMode = globalParams.engineMode;
-            switchState = SwitchState::FadingOut;
-            fadePos = 0;
+            if (activeMode == EngineMode::Studio && globalParams.engineMode == EngineMode::Studio
+                && globalParams.liveBufferSize != activeLiveBuffer)
+            {
+                activeLiveBuffer = globalParams.liveBufferSize;
+                pendingLiveBuffer = globalParams.liveBufferSize;
+                liveLatencySamples = computeLiveLatencySamples(fs, activeLiveBuffer);
+                inputTunerLive.setLatencySamples(liveLatencySamples);
+                for (int v = 0; v < kMaxVoices; ++v)
+                    liveVoices[static_cast<size_t>(v)].setLatencySamples(liveLatencySamples);
+            }
+            else if (globalParams.engineMode != activeMode
+                     || (activeMode == EngineMode::Live && globalParams.liveBufferSize != activeLiveBuffer))
+            {
+                pendingMode = globalParams.engineMode;
+                pendingLiveBuffer = globalParams.liveBufferSize;
+                switchState = SwitchState::FadingOut;
+                fadePos = 0;
+            }
         }
 
         int subLen = chunk;
@@ -160,8 +207,16 @@ void HarmonizerEngine::processBlock(const float* const* inChannels,
         if (switchState == SwitchState::FadingOut && fadePos >= fadeLengthSamples)
         {
             activeMode = pendingMode;
+            activeLiveBuffer = pendingLiveBuffer;
+            liveLatencySamples = computeLiveLatencySamples(fs, activeLiveBuffer);
+            inputTunerLive.setLatencySamples(liveLatencySamples);
+            for (int v = 0; v < kMaxVoices; ++v)
+                liveVoices[static_cast<size_t>(v)].setLatencySamples(liveLatencySamples);
+
             activeLatencySamples = (activeMode == EngineMode::Live) ? liveLatencySamples : studioLatencySamples;
 
+            inputTunerLive.reset();
+            inputTunerStudio.reset();
             for (int v = 0; v < kMaxVoices; ++v)
             {
                 if (activeMode == EngineMode::Live)
@@ -172,6 +227,7 @@ void HarmonizerEngine::processBlock(const float* const* inChannels,
             }
             dryDelayL.reset();
             dryDelayR.reset();
+            harmonyBusFx.reset();
 
             reportedLatency.store(activeLatencySamples, std::memory_order_release);
             latencyChanged.store(true, std::memory_order_release);
@@ -220,38 +276,146 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
     // Update pitch tracker & shared pitch-mark buffer once per block
     pitchTracker.processBlock(monoInBuf.data(), numSamples);
     const PitchEstimate pitchEst = pitchTracker.getEstimate();
+    const float instantF0 = pitchTracker.getInstantHz();
     const float validF0 = pitchTracker.getSmoothedValidHz();
 
     const int64_t markBasePos = pitchMarkDetector.getWritePos();
     for (int i = 0; i < numSamples; ++i)
-        pitchMarkDetector.pushSample(monoInBuf[static_cast<size_t>(i)], validF0, pitchEst.isVoiced);
+        pitchMarkDetector.pushSample(monoInBuf[static_cast<size_t>(i)], instantF0, pitchEst.isVoiced);
+
+    const ScaleType scale = static_cast<ScaleType>(std::clamp(globalParams.scaleIndex, 0, static_cast<int>(ScaleType::NumScales) - 1));
+
+    // Input Pitch Correction (zero extra latency, zero double-shifting)
+    const float tuneAmt = std::clamp(globalParams.inputTuneAmount, 0.0f, 1.0f);
+    const float quantizedMidi = ScaleHarmonizer::quantizeToScaleMidi(pitchEst.midiNote, globalParams.key, scale);
+    const float rawErrSt = (pitchEst.isVoiced && pitchEst.voicingConfidence > 0.35f)
+        ? std::clamp(quantizedMidi - pitchEst.midiNote, -1.5f, 1.5f)
+        : 0.0f;
+
+    const float retuneMs = 80.0f - 68.0f * tuneAmt;
+    const float corrAlpha = static_cast<float>(1.0 - std::exp(-static_cast<double>(numSamples) / (0.001 * static_cast<double>(retuneMs) * fs)));
+    smoothedCorrectionSt += corrAlpha * (rawErrSt * tuneAmt - smoothedCorrectionSt);
+
+    const float targetTuneBlend = (tuneAmt > 0.005f) ? std::clamp(tuneAmt / 0.05f, 0.0f, 1.0f) : 0.0f;
+    const bool runInputTuner = (tuneAmt > 0.005f || smoothedTuneBlend > 0.001f);
+
+    if (runInputTuner)
+    {
+        if (activeMode == EngineMode::Live)
+        {
+            for (int i = 0; i < numSamples; ++i)
+            {
+                tunedLeadBuf[static_cast<size_t>(i)] = inputTunerLive.processSample(
+                    pitchMarkDetector,
+                    markBasePos + i,
+                    instantF0,
+                    pitchEst.voicingConfidence,
+                    smoothedCorrectionSt,
+                    0.0f,
+                    retuneMs,
+                    globalParams.naturalness);
+            }
+        }
+        else
+        {
+            inputTunerStudio.process(
+                monoInBuf.data(),
+                tunedLeadBuf.data(),
+                numSamples,
+                smoothedCorrectionSt,
+                0.0f,
+                validF0,
+                pitchEst.isVoiced,
+                retuneMs,
+                globalParams.naturalness);
+        }
+    }
+
+    const int voiceLimit = (globalParams.activeVoiceBankCount >= 8) ? kMaxVoices : kExposedVoicesV1;
+
+    // Advance polyphonic MIDI state
+    midiController.setActiveSlotCount(voiceLimit);
+    midiController.advanceBlock(numSamples);
+    const bool isMidiMode = (globalParams.harmonyMode == HarmonyMode::Midi);
+    const float activeInputMidi = pitchEst.isVoiced ? pitchEst.midiNote : hzToMidi(instantF0);
 
     bool anySolo = false;
-    for (int v = 0; v < kMaxVoices; ++v)
+    for (int v = 0; v < voiceLimit; ++v)
     {
-        if (voiceParams[static_cast<size_t>(v)].enabled && voiceParams[static_cast<size_t>(v)].solo)
+        const auto& vp = voiceParams[static_cast<size_t>(v)];
+        if (isMidiMode)
+        {
+            const auto& slot = midiController.getSlot(v);
+            if ((slot.isActive() || slot.gateEnvelope > 0.001f) && vp.solo)
+            {
+                anySolo = true;
+                break;
+            }
+        }
+        else if (vp.enabled && vp.solo)
         {
             anySolo = true;
             break;
         }
     }
 
-    const ScaleType scale = static_cast<ScaleType>(std::clamp(globalParams.scaleIndex, 0, static_cast<int>(ScaleType::NumScales) - 1));
     const int tailHoldSamples = static_cast<int>(std::ceil(fs * 0.04));
+    int activeVoiceCount = 0;
 
     for (int v = 0; v < kMaxVoices; ++v)
     {
+        const bool inBank = (v < voiceLimit);
         const auto& vp = voiceParams[static_cast<size_t>(v)];
-        const bool audible = vp.enabled && (anySolo ? vp.solo : !vp.mute);
+        const auto& midiSlot = midiController.getSlot(v);
+        const bool midiActiveOrTail = inBank && (midiSlot.isActive() || midiSlot.gateEnvelope > 0.001f);
+
+        const bool audible = inBank && (isMidiMode
+            ? (midiActiveOrTail && (anySolo ? vp.solo : !vp.mute))
+            : (vp.enabled && (anySolo ? vp.solo : !vp.mute)));
+
+        if (isMidiMode ? (inBank && midiSlot.isActive() && audible) : audible)
+            ++activeVoiceCount;
 
         if (audible)
             voiceTailRemaining[static_cast<size_t>(v)] = tailHoldSamples;
         else if (voiceTailRemaining[static_cast<size_t>(v)] > 0)
             voiceTailRemaining[static_cast<size_t>(v)] = std::max(0, voiceTailRemaining[static_cast<size_t>(v)] - numSamples);
 
-        const float baseShiftSt = scaleHarmonizer.computeShiftSemitones(
-            pitchEst.midiNote, pitchEst.isVoiced, globalParams.key, scale, vp.intervalSteps, vp.detuneCents);
-        const float humanizeCents = channelStrips[static_cast<size_t>(v)].computeHumanizeCents(globalParams.humanize, numSamples);
+        float baseShiftSt = 0.0f;
+        if (!inBank)
+        {
+            telemetry.voiceMidiNote[static_cast<size_t>(v)].store(-1, std::memory_order_relaxed);
+            telemetry.voiceMidiActive[static_cast<size_t>(v)].store(false, std::memory_order_relaxed);
+        }
+        else if (isMidiMode)
+        {
+            if (midiSlot.midiNote >= 0)
+            {
+                const float targetMidi = static_cast<float>(midiSlot.midiNote) + midiController.getPitchBendSemitones();
+                baseShiftSt = std::clamp(targetMidi - activeInputMidi + vp.detuneCents * 0.01f, -24.0f, 24.0f);
+            }
+            telemetry.voiceMidiNote[static_cast<size_t>(v)].store(midiSlot.midiNote, std::memory_order_relaxed);
+            telemetry.voiceMidiActive[static_cast<size_t>(v)].store(midiSlot.isActive(), std::memory_order_relaxed);
+        }
+        else
+        {
+            if (vp.fixedPitch)
+            {
+                const float targetMidi = static_cast<float>(std::clamp(vp.fixedMidiNote, 36, 96));
+                baseShiftSt = std::clamp(targetMidi - activeInputMidi + vp.detuneCents * 0.01f, -24.0f, 24.0f);
+            }
+            else
+            {
+                baseShiftSt = scaleHarmonizer.computeShiftSemitones(
+                    pitchEst.midiNote, pitchEst.isVoiced, globalParams.key, scale, vp.intervalSteps, vp.detuneCents)
+                    + smoothedCorrectionSt;
+            }
+            telemetry.voiceMidiNote[static_cast<size_t>(v)].store(-1, std::memory_order_relaxed);
+            telemetry.voiceMidiActive[static_cast<size_t>(v)].store(false, std::memory_order_relaxed);
+        }
+
+        const float humanizeCents = channelStrips[static_cast<size_t>(v)].computeHumanizeCents(
+            globalParams.humanize, vp.vibratoDepth, pitchEst.voicingConfidence, numSamples);
         const float totalShiftSt = std::clamp(baseShiftSt + humanizeCents * 0.01f, -24.0f, 24.0f);
 
         telemetry.voiceTargetSemitones[static_cast<size_t>(v)].store(baseShiftSt, std::memory_order_relaxed);
@@ -270,10 +434,12 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
                 voiceOutBuf[static_cast<size_t>(i)] = liveVoice.processSample(
                     pitchMarkDetector,
                     markBasePos + i,
-                    validF0,
-                    pitchEst.isVoiced,
+                    instantF0,
+                    pitchEst.voicingConfidence,
                     totalShiftSt,
-                    vp.formantSemitones);
+                    vp.formantSemitones,
+                    globalParams.glideMs,
+                    globalParams.naturalness);
             }
         }
         else
@@ -284,7 +450,18 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
                 numSamples,
                 totalShiftSt,
                 vp.formantSemitones,
-                validF0);
+                validF0,
+                pitchEst.isVoiced,
+                globalParams.glideMs,
+                globalParams.naturalness);
+        }
+
+        if (isMidiMode)
+        {
+            const float velGain = 0.45f + 0.55f * midiSlot.velocity;
+            const float envGain = midiSlot.gateEnvelope * velGain;
+            for (int i = 0; i < numSamples; ++i)
+                voiceOutBuf[static_cast<size_t>(i)] *= envGain;
         }
 
         float voiceRms = 0.0f;
@@ -301,13 +478,33 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
         telemetry.voiceRms[static_cast<size_t>(v)].store(voiceRms, std::memory_order_relaxed);
     }
 
+    // Automatic active-voice headroom scaling so multi-voice Mix 100% stays clean without clipping
+    const float targetBusTrim = 1.0f / std::sqrt(static_cast<float>(std::max(1, activeVoiceCount)));
+    const float trimAlpha = static_cast<float>(1.0 - std::exp(-static_cast<double>(numSamples) / (0.025 * fs)));
+    if (firstBlockAfterReset)
+        smoothedBusTrim = targetBusTrim;
+    else
+        smoothedBusTrim += trimAlpha * (targetBusTrim - smoothedBusTrim);
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        wetBusL[static_cast<size_t>(i)] *= smoothedBusTrim;
+        wetBusR[static_cast<size_t>(i)] *= smoothedBusTrim;
+    }
+
+    harmonyBusFx.process(wetBusL.data(), wetBusR.data(), numSamples,
+                         globalParams.deEssAmount, globalParams.spaceAmount);
+
     const float targetMix = std::clamp(globalParams.mix, 0.0f, 1.0f);
     const float targetOutGain = dbToGain(std::clamp(globalParams.outputGainDb, -24.0f, 12.0f));
+    const float targetBypassWet = globalParams.bypass ? 0.0f : 1.0f;
 
     if (firstBlockAfterReset)
     {
         smoothedMix = targetMix;
         smoothedOutGain = targetOutGain;
+        smoothedTuneBlend = targetTuneBlend;
+        smoothedBypassWet = targetBypassWet;
         firstBlockAfterReset = false;
     }
 
@@ -319,6 +516,8 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
     {
         smoothedMix += paramSmoothAlpha * (targetMix - smoothedMix);
         smoothedOutGain += paramSmoothAlpha * (targetOutGain - smoothedOutGain);
+        smoothedTuneBlend += paramSmoothAlpha * (targetTuneBlend - smoothedTuneBlend);
+        smoothedBypassWet += paramSmoothAlpha * (targetBypassWet - smoothedBypassWet);
 
         float switchGain = 1.0f;
         if (switchState == SwitchState::FadingOut)
@@ -334,14 +533,28 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
 
         // Read time-aligned dry sample matching exact current engine latency
         const int dryDelayTap = std::max(0, activeLatencySamples + (numSamples - 1 - i));
-        const float dryL = dryDelayL.readInt(dryDelayTap);
-        const float dryR = dryDelayR.readInt(dryDelayTap);
+        const float rawDryL = dryDelayL.readInt(dryDelayTap);
+        const float rawDryR = dryDelayR.readInt(dryDelayTap);
+
+        const float tunedSample = runInputTuner ? tunedLeadBuf[static_cast<size_t>(i)] : rawDryL;
+        const float leadL = rawDryL + smoothedTuneBlend * (tunedSample - rawDryL);
+        const float leadR = rawDryR + smoothedTuneBlend * (tunedSample - rawDryR);
 
         const float dryWeight = 1.0f - smoothedMix;
         const float wetWeight = smoothedMix;
 
-        const float outL = sanitizeSample((dryWeight * dryL + wetWeight * wetBusL[static_cast<size_t>(i)]) * smoothedOutGain * switchGain);
-        const float outR = sanitizeSample((dryWeight * dryR + wetWeight * wetBusR[static_cast<size_t>(i)]) * smoothedOutGain * switchGain);
+        const float procL = softCeiling((dryWeight * leadL + wetWeight * wetBusL[static_cast<size_t>(i)]) * smoothedOutGain * switchGain);
+        const float procR = softCeiling((dryWeight * leadR + wetWeight * wetBusR[static_cast<size_t>(i)]) * smoothedOutGain * switchGain);
+
+        const float dryBypassL = rawDryL * switchGain;
+        const float dryBypassR = rawDryR * switchGain;
+
+        const float outL = (smoothedBypassWet <= 1.0e-5f)
+            ? dryBypassL
+            : (dryBypassL + smoothedBypassWet * (procL - dryBypassL));
+        const float outR = (smoothedBypassWet <= 1.0e-5f)
+            ? dryBypassR
+            : (dryBypassR + smoothedBypassWet * (procR - dryBypassR));
 
         if (numOutChannels >= 2)
         {
@@ -369,8 +582,13 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
     telemetry.detectedMidi.store(pitchEst.midiNote, std::memory_order_relaxed);
     telemetry.voicedClarity.store(pitchEst.clarity, std::memory_order_relaxed);
     telemetry.isVoiced.store(pitchEst.isVoiced, std::memory_order_relaxed);
+    telemetry.bypassed.store(globalParams.bypass, std::memory_order_relaxed);
     telemetry.activeLatencySamples.store(activeLatencySamples, std::memory_order_relaxed);
+    telemetry.activeVoiceBankCount.store(voiceLimit, std::memory_order_relaxed);
     telemetry.activeMode.store(static_cast<int>(activeMode), std::memory_order_relaxed);
+    telemetry.activeHarmonyMode.store(static_cast<int>(globalParams.harmonyMode), std::memory_order_relaxed);
+    telemetry.inputTuneCorrectionCents.store(globalParams.bypass ? 0.0f : (smoothedCorrectionSt * 100.0f), std::memory_order_relaxed);
+    telemetry.deEssReductionDb.store(globalParams.bypass ? 0.0f : harmonyBusFx.getDeEssReductionDb(), std::memory_order_relaxed);
 }
 
 } // namespace harmonizer::dsp

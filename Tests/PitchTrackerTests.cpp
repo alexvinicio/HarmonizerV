@@ -82,3 +82,30 @@ TEST_CASE("PitchTracker rejects white noise and high-frequency sibilance", "[Pit
     const auto est = tracker.getEstimate();
     REQUIRE_FALSE(est.isVoiced);
 }
+
+TEST_CASE("PitchTracker Schmitt-trigger hysteresis prevents chatter during clarity dips", "[PitchTracker]")
+{
+    harmonizer::dsp::PitchTracker tracker;
+    const double sr = 48000.0;
+    tracker.prepare(sr);
+
+    // 1) Establish solid voiced lock on 220 Hz tone
+    const auto voiced = makeVocalTone(220.0, sr, 4096);
+    tracker.processBlock(voiced.data(), static_cast<int>(voiced.size()));
+    REQUIRE(tracker.getEstimate().isVoiced);
+    REQUIRE(tracker.getEstimate().voicingConfidence > 0.7f);
+
+    // 2) Inject brief partial breathiness (~25 ms) so clarity dips around 0.45-0.55
+    std::vector<float> breathy(1200, 0.0f);
+    uint32_t rng = 0x55AA3311u;
+    for (int i = 0; i < 1200; ++i)
+    {
+        rng = rng * 1664525u + 1013904223u;
+        const float n = (static_cast<float>(rng & 0xFFFFu) / 32768.0f - 1.0f) * 0.30f;
+        const double t = static_cast<double>(i) / sr;
+        breathy[static_cast<size_t>(i)] = 0.28f * static_cast<float>(std::sin(harmonizer::dsp::kTwoPi * 220.0 * t)) + n;
+    }
+
+    tracker.processBlock(breathy.data(), static_cast<int>(breathy.size()));
+    REQUIRE(tracker.getEstimate().isVoiced);
+}
