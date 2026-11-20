@@ -54,11 +54,15 @@ jobs:
       - name: Download and run pluginval (macOS)
         if: runner.os == 'macOS'
         run: |
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          cp -R "${{ matrix.au_path }}" "$HOME/Library/Audio/Plug-Ins/Components/"
+          killall -9 AudioComponentRegistrar || true
+          auval -a | grep -i HarmonizerV || true
           curl -L -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip"
           unzip -q pluginval.zip -d pluginval_bin
           APP=$(find pluginval_bin -name "pluginval.app" | head -n 1)
           "$APP/Contents/MacOS/pluginval" --strictness-level 5 --validate-in-process "${{ matrix.vst3_path }}"
-          "$APP/Contents/MacOS/pluginval" --strictness-level 5 --validate-in-process "${{ matrix.au_path }}"
+          "$APP/Contents/MacOS/pluginval" --strictness-level 5 --validate-in-process "$HOME/Library/Audio/Plug-Ins/Components/HarmonizerV.component"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v6

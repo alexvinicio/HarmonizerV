@@ -98,7 +98,7 @@ juce_add_plugin(HarmonizerV
     FORMATS ${HARMONIZERV_FORMATS}
     PRODUCT_NAME "HarmonizerV"
     VST3_CATEGORIES "Fx" "Pitch Shift"
-    AU_MAIN_TYPE kAudioUnitType_Effect
+    AU_MAIN_TYPE kAudioUnitType_MusicEffect
 )
 
 target_sources(HarmonizerV PRIVATE
