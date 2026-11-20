@@ -100,6 +100,13 @@ float HarmonyStage::voiceRadius(int voiceIndex) const noexcept
 juce::Point<float> HarmonyStage::voiceToPoint(int voiceIndex) const noexcept
 {
     const float pan = getParamPlain(params::voiceParamId(voiceIndex, params::vPan), 0.0f);
+    if (latestSnap.activeHarmonyMode == dsp::HarmonyMode::Midi)
+    {
+        const int semi = latestSnap.voiceMidiActive[static_cast<size_t>(voiceIndex)]
+            ? std::clamp(static_cast<int>(std::lround(latestSnap.voiceTargetSemitones[static_cast<size_t>(voiceIndex)])), -14, 14)
+            : 0;
+        return { panToX(pan), intervalToY(semi) };
+    }
     const int interval = static_cast<int>(std::lround(getParamPlain(params::voiceParamId(voiceIndex, params::vInterval), 0.0f)));
     return { panToX(pan), intervalToY(interval) };
 }
@@ -144,13 +151,25 @@ void HarmonyStage::paint(juce::Graphics& g)
     const auto area = getStageArea();
     const int scaleIdx = static_cast<int>(std::lround(getParamPlain(params::scale, 0.0f)));
     const auto scaleType = static_cast<dsp::ScaleType>(scaleIdx);
+    const bool isMidiMode = (latestSnap.activeHarmonyMode == dsp::HarmonyMode::Midi);
+
+    static constexpr std::array<const char*, 12> kMidiNotes = {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    };
+    auto formatMidiNote = [&](int note) -> juce::String
+    {
+        if (note < 0 || note > 127)
+            return "--";
+        return juce::String(kMidiNotes[static_cast<size_t>(note % 12)]) + juce::String((note / 12) - 1);
+    };
 
     // Quick Voice Select Pills (V1..V4)
     for (int v = 0; v < dsp::kExposedVoicesV1; ++v)
     {
         const auto pr = pillRects[static_cast<size_t>(v)];
         const bool isSelected = (v == selectedVoice);
-        const bool isEnabled = getParamPlain(params::voiceParamId(v, params::vEnabled), 0.0f) >= 0.5f;
+        const bool midiActive = latestSnap.voiceMidiActive[static_cast<size_t>(v)];
+        const bool isEnabled = isMidiMode ? midiActive : (getParamPlain(params::voiceParamId(v, params::vEnabled), 0.0f) >= 0.5f);
         const bool isMuted = getParamPlain(params::voiceParamId(v, params::vMute), 0.0f) >= 0.5f;
         const auto col = Theme::getVoiceColour(v);
 
@@ -179,9 +198,12 @@ void HarmonyStage::paint(juce::Graphics& g)
     }
 
     // Subtle hint top-right
-    g.setColour(Theme::textMuted);
-    g.setFont(Theme::makeFont(10.5f));
-    g.drawFittedText("Drag: Pan / Pitch  ·  Wheel: Level  ·  Double-Click: On/Off",
+    g.setColour(isMidiMode ? Theme::getVoiceColour(0).withAlpha(0.85f) : Theme::textMuted);
+    g.setFont(Theme::makeFont(10.5f, isMidiMode));
+    const juce::String hintText = isMidiMode
+        ? "MIDI MODE  ·  Play Chords on MIDI Keyboard / Track  ·  Drag X: Pan  ·  Wheel: Level"
+        : "Drag: Pan / Pitch  ·  Wheel: Level  ·  Double-Click: On/Off";
+    g.drawFittedText(hintText,
                      getLocalBounds().reduced(16, 12).removeFromTop(22),
                      juce::Justification::centredRight, 1);
 
@@ -244,7 +266,8 @@ void HarmonyStage::paint(juce::Graphics& g)
             if ((pass == 0 && isSelected) || (pass == 1 && !isSelected))
                 continue;
 
-            const bool isEnabled = getParamPlain(params::voiceParamId(v, params::vEnabled), 0.0f) >= 0.5f;
+            const bool midiActive = latestSnap.voiceMidiActive[static_cast<size_t>(v)];
+            const bool isEnabled = isMidiMode ? midiActive : (getParamPlain(params::voiceParamId(v, params::vEnabled), 0.0f) >= 0.5f);
             const bool isMuted = getParamPlain(params::voiceParamId(v, params::vMute), 0.0f) >= 0.5f;
             const int interval = static_cast<int>(std::lround(getParamPlain(params::voiceParamId(v, params::vInterval), 0.0f)));
             const auto pt = voiceToPoint(v);
@@ -292,7 +315,9 @@ void HarmonyStage::paint(juce::Graphics& g)
                              juce::Rectangle<int>(static_cast<int>(pt.x - r), static_cast<int>(pt.y - 8), static_cast<int>(r * 2.0f), 16),
                              juce::Justification::centred, 1);
 
-            const juce::String ivLabel = dsp::ScaleHarmonizer::formatIntervalLabel(interval, scaleType);
+            const juce::String ivLabel = isMidiMode
+                ? (midiActive ? formatMidiNote(latestSnap.voiceMidiNote[static_cast<size_t>(v)]) : juce::String("--"))
+                : juce::String(dsp::ScaleHarmonizer::formatIntervalLabel(interval, scaleType));
             g.setColour(isEnabled ? Theme::textPrimary : Theme::textMuted);
             g.setFont(Theme::makeFont(10.0f, isSelected));
             g.drawFittedText(ivLabel,
@@ -372,10 +397,13 @@ void HarmonyStage::mouseDrag(const juce::MouseEvent& e)
         return;
 
     const float newPan = xToPan(e.position.x);
-    const int newInterval = yToInterval(e.position.y);
-
     setParamPlain(params::voiceParamId(draggingVoice, params::vPan), newPan, false);
-    setParamPlain(params::voiceParamId(draggingVoice, params::vInterval), static_cast<float>(newInterval), false);
+
+    if (latestSnap.activeHarmonyMode != dsp::HarmonyMode::Midi)
+    {
+        const int newInterval = yToInterval(e.position.y);
+        setParamPlain(params::voiceParamId(draggingVoice, params::vInterval), static_cast<float>(newInterval), false);
+    }
     repaint();
 }
 

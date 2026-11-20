@@ -100,7 +100,7 @@ TEST_CASE("HarmonizerEngine dry path matches exact reported latency in both LIVE
         const int totalSamples = expectedLat + 1024;
         std::vector<float> in(static_cast<size_t>(totalSamples), 0.0f);
         std::vector<float> out(static_cast<size_t>(totalSamples), 0.0f);
-        in[0] = 1.0f;
+        in[0] = 0.5f;
 
         for (int off = 0; off < totalSamples; off += bs)
         {
@@ -120,7 +120,7 @@ TEST_CASE("HarmonizerEngine dry path matches exact reported latency in both LIVE
                 peakIdx = i;
             }
         }
-        REQUIRE(peakVal == Catch::Approx(1.0f).margin(0.01f));
+        REQUIRE(peakVal == Catch::Approx(0.5f).margin(0.01f));
         REQUIRE(peakIdx == expectedLat);
     };
 
@@ -392,4 +392,251 @@ TEST_CASE("VocalSpace generates smooth decaying stereo tail", "[HarmonyBusFx]")
         REQUIRE(std::isfinite(s));
     for (float s : bufR)
         REQUIRE(std::isfinite(s));
+}
+
+TEST_CASE("HarmonyDeEsser keeps flat passband at 1.5 kHz and 4.8 kHz without notch distortion", "[HarmonyBusFx]")
+{
+    const double sr = 48000.0;
+    const int n = 4800;
+
+    auto measureRmsAt = [&](double freqHz, float amp, float deEssAmt)
+    {
+        HarmonyDeEsser ds;
+        ds.prepare(sr);
+        std::vector<float> bufL(static_cast<size_t>(n), 0.0f), bufR(static_cast<size_t>(n), 0.0f);
+        for (int i = 0; i < n; ++i)
+        {
+            const float s = amp * static_cast<float>(std::sin(kTwoPi * freqHz * (static_cast<double>(i) / sr)));
+            bufL[static_cast<size_t>(i)] = s;
+            bufR[static_cast<size_t>(i)] = s;
+        }
+        ds.process(bufL.data(), bufR.data(), n, deEssAmt);
+
+        double acc = 0.0;
+        for (int i = n / 2; i < n; ++i)
+            acc += static_cast<double>(bufL[static_cast<size_t>(i)]) * bufL[static_cast<size_t>(i)];
+        return std::sqrt(acc / static_cast<double>(n / 2));
+    };
+
+    for (double f : { 300.0, 1500.0, 4800.0 })
+    {
+        // Moderate vocal energy below sibilance threshold must pass flat (< 0.5 dB loss)
+        const double off = measureRmsAt(f, 0.02f, 0.0f);
+        const double on  = measureRmsAt(f, 0.02f, 1.0f);
+        const double lossDb = 20.0 * std::log10(off / std::max(1.0e-9, on));
+        INFO("Freq=" << f << " Hz loss=" << lossDb << " dB");
+        REQUIRE(std::abs(lossDb) < 0.5);
+    }
+}
+
+TEST_CASE("HarmonizerEngine hot -3 dBFS 4-voice Mix 100% stays below 0 dBFS without hard clipping", "[HarmonizerEngine]")
+{
+    const double sr = 48000.0;
+    const int bs = 128;
+    const auto vp = makeFourActiveVoices();
+
+    for (EngineMode mode : { EngineMode::Live, EngineMode::Studio })
+    {
+        HarmonizerEngine engine;
+        engine.prepare(sr, bs);
+
+        GlobalParams gp;
+        gp.engineMode = mode;
+        gp.mix = 1.0f;
+        gp.deEssAmount = 0.35f;
+        gp.spaceAmount = 0.20f;
+
+        std::vector<float> in(bs, 0.0f), outL(bs, 0.0f), outR(bs, 0.0f);
+        float maxPeak = 0.0f;
+        double rmsAcc = 0.0;
+
+        for (int blk = 0; blk < 180; ++blk)
+        {
+            for (int i = 0; i < bs; ++i)
+            {
+                const double t = static_cast<double>(blk * bs + i) / sr;
+                in[static_cast<size_t>(i)] = static_cast<float>(
+                    0.45 * std::sin(kTwoPi * 220.0 * t) + 0.25 * std::sin(kTwoPi * 440.0 * t)); // ~ -3 dBFS
+            }
+            const float* inPtr[1] = { in.data() };
+            float* outPtr[2] = { outL.data(), outR.data() };
+            engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+
+            for (int i = 0; i < bs; ++i)
+            {
+                REQUIRE(std::isfinite(outL[static_cast<size_t>(i)]));
+                REQUIRE(std::isfinite(outR[static_cast<size_t>(i)]));
+                maxPeak = std::max(maxPeak, std::max(std::abs(outL[static_cast<size_t>(i)]), std::abs(outR[static_cast<size_t>(i)])));
+                if (blk > 90)
+                    rmsAcc += static_cast<double>(outL[static_cast<size_t>(i)]) * outL[static_cast<size_t>(i)];
+            }
+        }
+
+        INFO("Mode=" << static_cast<int>(mode) << " maxPeak=" << maxPeak << " rmsAcc=" << rmsAcc);
+        REQUIRE(maxPeak <= 0.99f);
+        REQUIRE(rmsAcc > 0.5);
+    }
+}
+
+TEST_CASE("HarmonizerEngine input pitch correction pulls flat A3 toward 220 Hz", "[HarmonizerEngine][Tune]")
+{
+    const double sr = 48000.0;
+    const int bs = 128;
+
+    HarmonizerEngine engine;
+    engine.prepare(sr, bs);
+
+    GlobalParams gp;
+    gp.key = 0;        // C Major (contains A3 = 220 Hz)
+    gp.scaleIndex = 0; // Major
+    gp.engineMode = EngineMode::Live;
+    gp.mix = 0.0f;     // Listen to corrected Lead only
+    gp.inputTuneAmount = 1.0f;
+    std::array<VoiceParams, kMaxVoices> vp{};
+
+    const double flatA3Hz = 220.0 * std::pow(2.0, -35.0 / 1200.0); // ~215.60 Hz (-35 cents)
+    const int totalSamples = 188 * bs; // 24064 samples (~501 ms, exact multiple of bs)
+    std::vector<float> out(static_cast<size_t>(totalSamples), 0.0f);
+    std::vector<float> in(bs, 0.0f), outL(bs, 0.0f), outR(bs, 0.0f);
+
+    for (int off = 0; off < totalSamples; off += bs)
+    {
+        const int chunk = std::min(bs, totalSamples - off);
+        for (int i = 0; i < chunk; ++i)
+        {
+            const double t = static_cast<double>(off + i) / sr;
+            in[static_cast<size_t>(i)] = static_cast<float>(0.30 * std::sin(kTwoPi * flatA3Hz * t) + 0.14 * std::sin(kTwoPi * 2.0 * flatA3Hz * t));
+        }
+        const float* inPtr[1] = { in.data() };
+        float* outPtr[2] = { outL.data(), outR.data() };
+        engine.processBlock(inPtr, 1, outPtr, 2, chunk, gp, vp);
+        for (int i = 0; i < chunk; ++i)
+            out[static_cast<size_t>(off + i)] = outL[static_cast<size_t>(i)];
+    }
+
+    // Measure peak frequency on the last 8192 samples via fine DFT around 220 Hz
+    const int startIdx = 14000;
+    const int len = 8192;
+    double bestFreq = 215.6;
+    double bestMag = -1.0;
+    for (int step = 0; step <= 240; ++step)
+    {
+        const double f = 205.0 + 30.0 * (static_cast<double>(step) / 240.0);
+        double re = 0.0, im = 0.0;
+        const double wStep = kTwoPi * f / sr;
+        for (int n = 0; n < len; ++n)
+        {
+            const double win = 0.5 * (1.0 - std::cos(kTwoPi * n / (len - 1)));
+            const double x = static_cast<double>(out[static_cast<size_t>(startIdx + n)]) * win;
+            re += x * std::cos(wStep * n);
+            im -= x * std::sin(wStep * n);
+        }
+        const double mag = re * re + im * im;
+        if (mag > bestMag)
+        {
+            bestMag = mag;
+            bestFreq = f;
+        }
+    }
+
+    const double errCents = 1200.0 * std::log2(bestFreq / 220.0);
+    INFO("Input=215.6 Hz (-35ct), Corrected=" << bestFreq << " Hz (err vs 220Hz=" << errCents << " cents)");
+    REQUIRE(std::abs(errCents) <= 12.0);
+}
+
+TEST_CASE("MidiHarmonyController and HarmonizerEngine MIDI mode allocate and harmonize chords", "[MidiHarmony]")
+{
+    SECTION("MidiHarmonyController handles allocation, sustain pedal, pitch bend, and release")
+    {
+        MidiHarmonyController ctrl;
+        ctrl.prepare(48000.0, 4);
+
+        ctrl.noteOn(64, 0.8f); // E4
+        ctrl.noteOn(67, 0.9f); // G4
+        ctrl.advanceBlock(512);
+
+        REQUIRE(ctrl.hasAnyActiveNotes());
+        REQUIRE(ctrl.getSlot(0).midiNote == 64);
+        REQUIRE(ctrl.getSlot(1).midiNote == 67);
+        REQUIRE(ctrl.getSlot(0).gateEnvelope > 0.5f);
+
+        // Sustain holds released note
+        ctrl.setSustainPedal(true);
+        ctrl.noteOff(64);
+        ctrl.advanceBlock(512);
+        REQUIRE(ctrl.getSlot(0).isActive());
+
+        // Releasing sustain releases slot smoothly
+        ctrl.setSustainPedal(false);
+        ctrl.advanceBlock(512);
+        REQUIRE_FALSE(ctrl.getSlot(0).isActive());
+        REQUIRE(ctrl.getSlot(1).isActive());
+
+        ctrl.setPitchBendSemitones(1.5f);
+        REQUIRE(ctrl.getPitchBendSemitones() == Catch::Approx(1.5f));
+
+        ctrl.allNotesOff();
+        REQUIRE_FALSE(ctrl.hasAnyActiveNotes());
+    }
+
+    SECTION("HarmonizerEngine MIDI mode is silent without MIDI notes and sounds when notes held")
+    {
+        const double sr = 48000.0;
+        const int bs = 128;
+
+        HarmonizerEngine engine;
+        engine.prepare(sr, bs);
+
+        GlobalParams gp;
+        gp.harmonyMode = HarmonyMode::Midi;
+        gp.engineMode = EngineMode::Live;
+        gp.mix = 1.0f;
+        gp.spaceAmount = 0.0f;
+        const auto vp = makeFourActiveVoices();
+
+        std::vector<float> in(bs, 0.0f), outL(bs, 0.0f), outR(bs, 0.0f);
+        double silentEnergy = 0.0;
+
+        for (int blk = 0; blk < 20; ++blk)
+        {
+            for (int i = 0; i < bs; ++i)
+            {
+                const double t = static_cast<double>(blk * bs + i) / sr;
+                in[static_cast<size_t>(i)] = static_cast<float>(0.30 * std::sin(kTwoPi * 261.6256 * t)); // C4
+            }
+            const float* inPtr[1] = { in.data() };
+            float* outPtr[2] = { outL.data(), outR.data() };
+            engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+            for (float s : outL)
+                silentEnergy += static_cast<double>(s) * s;
+        }
+        REQUIRE(silentEnergy < 1.0e-5);
+
+        // Play E4 (64) and G4 (67)
+        engine.handleNoteOn(64, 0.9f);
+        engine.handleNoteOn(67, 0.9f);
+
+        double chordEnergy = 0.0;
+        for (int blk = 20; blk < 70; ++blk)
+        {
+            for (int i = 0; i < bs; ++i)
+            {
+                const double t = static_cast<double>(blk * bs + i) / sr;
+                in[static_cast<size_t>(i)] = static_cast<float>(0.30 * std::sin(kTwoPi * 261.6256 * t)); // C4
+            }
+            const float* inPtr[1] = { in.data() };
+            float* outPtr[2] = { outL.data(), outR.data() };
+            engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+            for (float s : outL)
+                chordEnergy += static_cast<double>(s) * s;
+        }
+
+        const auto snap = engine.getTelemetry();
+        REQUIRE(chordEnergy > 0.2);
+        REQUIRE(snap.activeHarmonyMode == HarmonyMode::Midi);
+        REQUIRE(snap.voiceMidiActive[0]);
+        REQUIRE(snap.voiceMidiActive[1]);
+        REQUIRE(snap.voiceMidiNote[0] == 64);
+        REQUIRE(snap.voiceMidiNote[1] == 67);
+    }
 }

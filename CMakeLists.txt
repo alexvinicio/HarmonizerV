@@ -7,7 +7,7 @@ if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 endif()
 
-project(HarmonizerV VERSION 2.0.0 LANGUAGES C CXX)
+project(HarmonizerV VERSION 2.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -50,6 +50,8 @@ add_library(HarmonizerV_DSP STATIC
     Source/Dsp/VoiceChannelStrip.cpp
     Source/Dsp/HarmonyBusFx.h
     Source/Dsp/HarmonyBusFx.cpp
+    Source/Dsp/MidiHarmonyController.h
+    Source/Dsp/MidiHarmonyController.cpp
     Source/Dsp/HarmonizerEngine.h
     Source/Dsp/HarmonizerEngine.cpp
 )

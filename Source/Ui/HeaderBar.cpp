@@ -89,12 +89,77 @@ void EngineModePill::mouseDown(const juce::MouseEvent& e)
 }
 
 // ============================================================================
+// HarmonyModePill
+// ============================================================================
+
+HarmonyModePill::HarmonyModePill(juce::AudioProcessorValueTreeState& apvts)
+{
+    if (auto* param = apvts.getParameter(params::harmonyMode))
+    {
+        attachment = std::make_unique<juce::ParameterAttachment>(
+            *param,
+            [this](float newValue) { handleParameterChanged(newValue); },
+            nullptr);
+        attachment->sendInitialUpdate();
+    }
+    setMouseCursor(juce::MouseCursor::PointingHandCursor);
+}
+
+void HarmonyModePill::handleParameterChanged(float newValue)
+{
+    currentMode = (newValue >= 0.5f) ? 1 : 0;
+    repaint();
+}
+
+void HarmonyModePill::paint(juce::Graphics& g)
+{
+    const auto pillArea = getLocalBounds().toFloat();
+
+    g.setColour(Theme::bgElevated);
+    g.fillRoundedRectangle(pillArea, 6.0f);
+    g.setColour(Theme::borderSubtle);
+    g.drawRoundedRectangle(pillArea.reduced(0.5f), 6.0f, 1.0f);
+
+    const float halfW = pillArea.getWidth() * 0.5f;
+    const auto autoRect = pillArea.withWidth(halfW).reduced(2.0f);
+    const auto midiRect = pillArea.withTrimmedLeft(halfW).reduced(2.0f);
+
+    if (currentMode == 0)
+    {
+        g.setColour(Theme::borderFocus.brighter(0.25f));
+        g.fillRoundedRectangle(autoRect, 4.5f);
+    }
+    else
+    {
+        g.setColour(Theme::getVoiceColour(0)); // Cyan MIDI accent
+        g.fillRoundedRectangle(midiRect, 4.5f);
+    }
+
+    g.setFont(Theme::makeFont(10.5f, true));
+    g.setColour(currentMode == 0 ? Theme::textPrimary : Theme::textSecondary);
+    g.drawFittedText("AUTO", autoRect.toNearestInt(), juce::Justification::centred, 1);
+
+    g.setColour(currentMode == 1 ? Theme::bgCanvas : Theme::textSecondary);
+    g.drawFittedText("MIDI", midiRect.toNearestInt(), juce::Justification::centred, 1);
+}
+
+void HarmonyModePill::mouseDown(const juce::MouseEvent& e)
+{
+    if (attachment == nullptr)
+        return;
+
+    const float target = (e.position.x < static_cast<float>(getWidth()) * 0.5f) ? 0.0f : 1.0f;
+    attachment->setValueAsCompleteGesture(target);
+}
+
+// ============================================================================
 // HeaderBar
 // ============================================================================
 
 HeaderBar::HeaderBar(HarmonizerVProcessor& proc)
     : processor(proc),
-      enginePill(proc.getApvts())
+      enginePill(proc.getApvts()),
+      harmonyModePill(proc.getApvts())
 {
     addAndMakeVisible(prevPresetBtn);
     addAndMakeVisible(presetCombo);
@@ -147,6 +212,7 @@ HeaderBar::HeaderBar(HarmonizerVProcessor& proc)
     scaleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         processor.getApvts(), params::scale, scaleCombo);
 
+    addAndMakeVisible(harmonyModePill);
     addAndMakeVisible(enginePill);
 
     mixKnob.setValueFormatter([](double v) { return juce::String(std::lround(v)) + "%"; });
@@ -225,40 +291,45 @@ void HeaderBar::updateTelemetry(const dsp::TelemetrySnapshot& snap)
 
 void HeaderBar::resized()
 {
-    auto r = getLocalBounds().reduced(12, 8);
+    auto r = getLocalBounds().reduced(10, 8);
 
     // Right side controls
     meterBounds = r.removeFromRight(14).reduced(1, 3);
+    r.removeFromRight(6);
+    outKnob.setBounds(r.removeFromRight(42));
+    r.removeFromRight(2);
+    mixKnob.setBounds(r.removeFromRight(42));
     r.removeFromRight(8);
-    outKnob.setBounds(r.removeFromRight(46));
-    r.removeFromRight(4);
-    mixKnob.setBounds(r.removeFromRight(46));
-    r.removeFromRight(10);
-    enginePill.setBounds(r.removeFromRight(118).withSizeKeepingCentre(118, 42));
-    r.removeFromRight(10);
+    enginePill.setBounds(r.removeFromRight(110).withSizeKeepingCentre(110, 42));
+    r.removeFromRight(8);
 
     // Left side brand + presets
-    r.removeFromLeft(112); // Space for brand wordmark painted cleanly
-    prevPresetBtn.setBounds(r.removeFromLeft(22).withSizeKeepingCentre(22, 26));
-    r.removeFromLeft(3);
+    r.removeFromLeft(102); // Space for brand wordmark painted cleanly
+    prevPresetBtn.setBounds(r.removeFromLeft(20).withSizeKeepingCentre(20, 26));
+    r.removeFromLeft(2);
 
-    const int presetWidth = std::clamp(r.getWidth() / 3, 105, 165);
+    const int fixedMiddleW = 84 + 6 + 50 + 4 + 38 + 20 + 2 + 4 + 8 + 6;
+    const int flexAvail = std::max(180, r.getWidth() - fixedMiddleW);
+    const int presetWidth = std::clamp(flexAvail * 36 / 100, 96, 150);
+    const int scaleW      = std::clamp(flexAvail * 36 / 100, 90, 122);
+    const int noteW       = std::clamp(flexAvail - presetWidth - scaleW, 76, 98);
+
     presetCombo.setBounds(r.removeFromLeft(presetWidth).withSizeKeepingCentre(presetWidth, 26));
+    r.removeFromLeft(2);
+    nextPresetBtn.setBounds(r.removeFromLeft(20).withSizeKeepingCentre(20, 26));
     r.removeFromLeft(3);
-    nextPresetBtn.setBounds(r.removeFromLeft(22).withSizeKeepingCentre(22, 26));
-    r.removeFromLeft(4);
-    savePresetBtn.setBounds(r.removeFromLeft(42).withSizeKeepingCentre(42, 26));
-    r.removeFromLeft(12);
-
-    // Center Key / Scale / Detected note pill
-    const int keyW = 54;
-    const int scaleW = std::min(126, std::max(90, r.getWidth() - 160));
-    keyCombo.setBounds(r.removeFromLeft(keyW).withSizeKeepingCentre(keyW, 26));
-    r.removeFromLeft(5);
-    scaleCombo.setBounds(r.removeFromLeft(scaleW).withSizeKeepingCentre(scaleW, 26));
+    savePresetBtn.setBounds(r.removeFromLeft(38).withSizeKeepingCentre(38, 26));
     r.removeFromLeft(8);
 
-    notePillBounds = r.withSizeKeepingCentre(std::min(104, r.getWidth()), 26);
+    // Center Harmony Mode / Key / Scale / Detected note pill
+    harmonyModePill.setBounds(r.removeFromLeft(84).withSizeKeepingCentre(84, 26));
+    r.removeFromLeft(6);
+    keyCombo.setBounds(r.removeFromLeft(50).withSizeKeepingCentre(50, 26));
+    r.removeFromLeft(4);
+    scaleCombo.setBounds(r.removeFromLeft(scaleW).withSizeKeepingCentre(scaleW, 26));
+    r.removeFromLeft(6);
+
+    notePillBounds = r.withSizeKeepingCentre(std::min(noteW, r.getWidth()), 26);
 }
 
 void HeaderBar::paint(juce::Graphics& g)
@@ -270,14 +341,14 @@ void HeaderBar::paint(juce::Graphics& g)
     g.drawRoundedRectangle(bounds.reduced(0.5f), Theme::kCardRadius, 1.0f);
 
     // Brand logo
-    const auto brandRect = getLocalBounds().reduced(12, 8).withWidth(108);
+    const auto brandRect = getLocalBounds().reduced(10, 8).withWidth(98);
     const auto accent = (latestSnap.activeMode == dsp::EngineMode::Live) ? Theme::liveAccent : Theme::studioAccent;
     g.setColour(accent);
     g.fillEllipse(static_cast<float>(brandRect.getX()), static_cast<float>(brandRect.getCentreY() - 4), 8.0f, 8.0f);
 
     g.setColour(Theme::textPrimary);
-    g.setFont(Theme::makeFont(14.5f, true));
-    g.drawFittedText("HarmonizerV", brandRect.withTrimmedLeft(13), juce::Justification::centredLeft, 1);
+    g.setFont(Theme::makeFont(13.5f, true));
+    g.drawFittedText("HarmonizerV", brandRect.withTrimmedLeft(12), juce::Justification::centredLeft, 1);
 
     // Live detected pitch pill
     if (!notePillBounds.isEmpty())

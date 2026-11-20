@@ -14,11 +14,11 @@ void HarmonyDeEsser::prepare(double sampleRate)
 {
     fs = std::max(8000.0, sampleRate);
     scBand.setParams(6800.0, 1.0, fs);
-    splitL.setParams(4800.0, 0.7071, fs);
-    splitR.setParams(4800.0, 0.7071, fs);
+    const double splitCut = std::min(3800.0, fs * 0.40);
+    splitAlpha = 1.0 - std::exp(-kTwoPi * splitCut / fs);
 
-    attackAlpha = static_cast<float>(1.0 - std::exp(-1.0 / (0.002 * fs)));
-    releaseAlpha = static_cast<float>(1.0 - std::exp(-1.0 / (0.045 * fs)));
+    attackAlpha = static_cast<float>(1.0 - std::exp(-1.0 / (0.003 * fs)));
+    releaseAlpha = static_cast<float>(1.0 - std::exp(-1.0 / (0.055 * fs)));
     broadAlpha = static_cast<float>(1.0 - std::exp(-1.0 / (0.015 * fs)));
     reset();
 }
@@ -26,8 +26,8 @@ void HarmonyDeEsser::prepare(double sampleRate)
 void HarmonyDeEsser::reset() noexcept
 {
     scBand.reset();
-    splitL.reset();
-    splitR.reset();
+    splitLpL = 0.0;
+    splitLpR = 0.0;
     envSib = 0.0f;
     envBroad = 0.0f;
     smoothedGain = 1.0f;
@@ -62,16 +62,17 @@ void HarmonyDeEsser::process(float* wetL, float* wetR, int numSamples, float deE
         const float excess = std::max(0.0f, envSib - thresh);
         const float targetGain = std::max(minGain, 1.0f / (1.0f + excess * (12.0f * amount)));
 
-        smoothedGain += attackAlpha * (targetGain - smoothedGain);
+        const float gainAlpha = (targetGain < smoothedGain) ? attackAlpha : releaseAlpha;
+        smoothedGain += gainAlpha * (targetGain - smoothedGain);
 
-        double lpL = 0.0, bpL = 0.0, hpL = 0.0;
-        double lpR = 0.0, bpR = 0.0, hpR = 0.0;
-        splitL.process(xL, lpL, bpL, hpL);
-        splitR.process(xR, lpR, bpR, hpR);
+        // Complementary 1-pole high-shelf split: lp + hp == x exactly, zero notch/phase artifact
+        splitLpL += splitAlpha * (xL - splitLpL);
+        splitLpR += splitAlpha * (xR - splitLpR);
+        const double hpL = xL - splitLpL;
+        const double hpR = xR - splitLpR;
 
-        // High-shelf style blend preserving vocal body (<4.8 kHz) intact
-        wetL[i] = sanitizeSample(static_cast<float>(lpL + bpL * 0.5 + hpL * static_cast<double>(smoothedGain)));
-        wetR[i] = sanitizeSample(static_cast<float>(lpR + bpR * 0.5 + hpR * static_cast<double>(smoothedGain)));
+        wetL[i] = sanitizeSample(static_cast<float>(splitLpL + hpL * static_cast<double>(smoothedGain)));
+        wetR[i] = sanitizeSample(static_cast<float>(splitLpR + hpR * static_cast<double>(smoothedGain)));
     }
 }
 

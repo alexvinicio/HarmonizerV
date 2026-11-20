@@ -3,6 +3,7 @@
 #include "Dsp/DelayLine.h"
 #include "Dsp/DspConstants.h"
 #include "Dsp/HarmonyBusFx.h"
+#include "Dsp/MidiHarmonyController.h"
 #include "Dsp/PitchMarkDetector.h"
 #include "Dsp/PitchTracker.h"
 #include "Dsp/ScaleHarmonizer.h"
@@ -22,6 +23,12 @@ class HarmonizerEngine
 public:
     void prepare(double sampleRate, int maxBlockSize);
     void reset() noexcept;
+
+    void handleNoteOn(int midiNote, float velocity) noexcept { midiController.noteOn(midiNote, velocity); }
+    void handleNoteOff(int midiNote) noexcept { midiController.noteOff(midiNote); }
+    void handleSustainPedal(bool down) noexcept { midiController.setSustainPedal(down); }
+    void handlePitchBend(float semitones) noexcept { midiController.setPitchBendSemitones(semitones); }
+    void handleAllNotesOff() noexcept { midiController.allNotesOff(); }
 
     void processBlock(const float* const* inChannels,
                       int numInChannels,
@@ -63,6 +70,10 @@ private:
     PitchTracker pitchTracker;
     ScaleHarmonizer scaleHarmonizer;
     PitchMarkDetector pitchMarkDetector;
+    MidiHarmonyController midiController;
+
+    TdPsolaVoice inputTunerLive;
+    SpectralVoice inputTunerStudio;
 
     std::array<TdPsolaVoice, kMaxVoices> liveVoices;
     std::array<SpectralVoice, kMaxVoices> studioVoices;
@@ -74,6 +85,7 @@ private:
     DelayLine dryDelayR;
 
     std::vector<float> monoInBuf;
+    std::vector<float> tunedLeadBuf;
     std::vector<float> voiceOutBuf;
     std::vector<float> wetBusL;
     std::vector<float> wetBusR;
@@ -90,6 +102,9 @@ private:
 
     float smoothedMix = 0.45f;
     float smoothedOutGain = 1.0f;
+    float smoothedCorrectionSt = 0.0f;
+    float smoothedTuneBlend = 0.0f;
+    float smoothedBusTrim = 1.0f;
     float paramSmoothAlpha = 0.01f;
     bool firstBlockAfterReset = true;
     bool prepared = false;
@@ -109,8 +124,12 @@ private:
         std::atomic<bool> isVoiced{ false };
         std::atomic<int> activeLatencySamples{ 512 };
         std::atomic<int> activeMode{ 0 };
+        std::atomic<int> activeHarmonyMode{ 0 };
+        std::atomic<float> inputTuneCorrectionCents{ 0.0f };
         std::array<std::atomic<float>, kMaxVoices> voiceRms{};
         std::array<std::atomic<float>, kMaxVoices> voiceTargetSemitones{};
+        std::array<std::atomic<int>, kMaxVoices> voiceMidiNote{};
+        std::array<std::atomic<bool>, kMaxVoices> voiceMidiActive{};
     } telemetry;
 };
 

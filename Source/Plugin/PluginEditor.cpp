@@ -25,7 +25,7 @@ HarmonizerVEditor::HarmonizerVEditor(HarmonizerVProcessor& p)
     };
 
     setResizable(true, true);
-    setResizeLimits(760, 510, 1400, 900);
+    setResizeLimits(840, 510, 1400, 900);
     setSize(920, 598);
 
     startTimerHz(30);

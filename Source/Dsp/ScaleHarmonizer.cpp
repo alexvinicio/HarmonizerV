@@ -115,6 +115,37 @@ float ScaleHarmonizer::computeShiftSemitones(float detectedMidi,
     return static_cast<float>(targetMidi - bestAbsMidi) + detuneSt;
 }
 
+float ScaleHarmonizer::quantizeToScaleMidi(float detectedMidi, int key, ScaleType scale) noexcept
+{
+    const int clampedScale = std::clamp(static_cast<int>(scale), 0, static_cast<int>(ScaleType::NumScales) - 1);
+    if (clampedScale == static_cast<int>(ScaleType::Chromatic))
+        return std::round(detectedMidi);
+
+    const auto& def = kScales[static_cast<size_t>(clampedScale)];
+    const int wrappedKey = ((key % 12) + 12) % 12;
+    const int approxOct = floorDiv(static_cast<int>(std::lround(detectedMidi)) - wrappedKey, 12);
+
+    float bestMidi = std::round(detectedMidi);
+    float bestDist = 999.0f;
+
+    for (int octOffset = -1; octOffset <= 1; ++octOffset)
+    {
+        const int candOct = approxOct + octOffset;
+        for (int deg = 0; deg < def.length; ++deg)
+        {
+            const float candMidi = static_cast<float>(wrappedKey + candOct * 12 + def.degrees[static_cast<size_t>(deg)]);
+            const float dist = std::abs(candMidi - detectedMidi);
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                bestMidi = candMidi;
+            }
+        }
+    }
+
+    return bestMidi;
+}
+
 std::string ScaleHarmonizer::formatIntervalLabel(int intervalSteps, ScaleType scale)
 {
     if (intervalSteps == 0)

@@ -155,7 +155,9 @@ float TdPsolaVoice::processSample(const PitchMarkDetector& markDetector,
         : trackerT0;
 
     const double tOut = std::clamp(t0 / pitchRatio, 12.0, fs / 30.0);
-    const double halfWidth = std::clamp(t0 * 1.05, 16.0, static_cast<double>(liveLatencySamples) * 1.35);
+    const double formantMargin = std::max(1.0, smoothedFormantRatio);
+    const double maxSafeHalfW = static_cast<double>(liveLatencySamples) * 0.92 / std::max(1.0, formantMargin - 0.10);
+    const double halfWidth = std::clamp(t0 * 1.05, 16.0, std::max(64.0, maxSafeHalfW));
 
     if (!synthInitialized)
     {
@@ -222,8 +224,10 @@ float TdPsolaVoice::processSample(const PitchMarkDetector& markDetector,
     }
 
     const double downShiftComp = (tOut > halfWidth) ? std::min(1.45, std::sqrt(tOut / halfWidth)) : 1.0;
+    const double diff = winSum - 0.85;
+    const double smoothDenom = 0.5 * (winSum + 0.85 + std::sqrt(diff * diff + 0.06));
     const float bodyOut = (winSum > 1.0e-4)
-        ? static_cast<float>((grainSum / std::max(winSum, 0.90)) * downShiftComp)
+        ? static_cast<float>((grainSum / smoothDenom) * downShiftComp)
         : 0.0f;
 
     // Clean decorrelated air (>4.5 kHz) pass-through prevents robotic consonant buzz

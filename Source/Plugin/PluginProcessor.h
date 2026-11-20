@@ -77,9 +77,11 @@ private:
     std::atomic<float>* keyParam = nullptr;
     std::atomic<float>* scaleParam = nullptr;
     std::atomic<float>* engineModeParam = nullptr;
+    std::atomic<float>* harmonyModeParam = nullptr;
     std::atomic<float>* mixParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
     std::atomic<float>* humanizeParam = nullptr;
+    std::atomic<float>* inputTuneParam = nullptr;
     std::atomic<float>* glideParam = nullptr;
     std::atomic<float>* naturalParam = nullptr;
     std::atomic<float>* deEssParam = nullptr;

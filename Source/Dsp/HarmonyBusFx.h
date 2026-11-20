@@ -52,8 +52,9 @@ private:
 
     double fs = 48000.0;
     SvfBand scBand;
-    SvfBand splitL;
-    SvfBand splitR;
+    double splitLpL = 0.0;
+    double splitLpR = 0.0;
+    double splitAlpha = 0.4;
 
     float envSib = 0.0f;
     float envBroad = 0.0f;

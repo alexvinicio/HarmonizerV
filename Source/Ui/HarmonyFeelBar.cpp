@@ -131,18 +131,22 @@ HarmonyFeelBar::HarmonyFeelBar(HarmonizerVProcessor& proc)
     auto& apvts = proc.getApvts();
 
     pills[0] = std::make_unique<FeelPillSlider>(
+        apvts, params::inputTune, "TUNE",
+        [](float v) { return (v < 0.5f) ? juce::String("OFF") : (juce::String(std::lround(v)) + "%"); });
+
+    pills[1] = std::make_unique<FeelPillSlider>(
         apvts, params::glideMs, "GLIDE",
         [](float v) { return juce::String(std::lround(v)) + " ms"; });
 
-    pills[1] = std::make_unique<FeelPillSlider>(
+    pills[2] = std::make_unique<FeelPillSlider>(
         apvts, params::naturalness, "NATURAL",
         [](float v) { return juce::String(std::lround(v)) + "%"; });
 
-    pills[2] = std::make_unique<FeelPillSlider>(
+    pills[3] = std::make_unique<FeelPillSlider>(
         apvts, params::deEssAmount, "DE-ESS",
         [](float v) { return juce::String(std::lround(v)) + "%"; });
 
-    pills[3] = std::make_unique<FeelPillSlider>(
+    pills[4] = std::make_unique<FeelPillSlider>(
         apvts, params::spaceAmount, "SPACE",
         [](float v) { return juce::String(std::lround(v)) + "%"; });
 
@@ -159,13 +163,14 @@ void HarmonyFeelBar::updateModeAccent(dsp::EngineMode mode)
 
 void HarmonyFeelBar::resized()
 {
-    auto r = getLocalBounds().reduced(12, 6);
-    constexpr int gap = 10;
-    const int pillW = std::max(60, (r.getWidth() - gap * 3) / 4);
-    for (int i = 0; i < 4; ++i)
+    auto r = getLocalBounds().reduced(10, 6);
+    constexpr int gap = 8;
+    const int count = static_cast<int>(pills.size());
+    const int pillW = std::max(55, (r.getWidth() - gap * (count - 1)) / count);
+    for (int i = 0; i < count; ++i)
     {
         pills[static_cast<size_t>(i)]->setBounds(r.removeFromLeft(pillW));
-        if (i < 3)
+        if (i < count - 1)
             r.removeFromLeft(gap);
     }
 }

@@ -51,7 +51,7 @@ private:
         bool dragging = false;
     };
 
-    std::array<std::unique_ptr<FeelPillSlider>, 4> pills;
+    std::array<std::unique_ptr<FeelPillSlider>, 5> pills;
 };
 
 } // namespace harmonizer::ui

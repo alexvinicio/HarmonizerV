@@ -23,6 +23,12 @@ enum class EngineMode : int
     Studio = 1
 };
 
+enum class HarmonyMode : int
+{
+    Auto = 0,
+    Midi = 1
+};
+
 struct VoiceParams
 {
     bool enabled = false;
@@ -43,9 +49,11 @@ struct GlobalParams
     int key = 0;                 // 0..11 (C..B)
     int scaleIndex = 0;          // 0..8
     EngineMode engineMode = EngineMode::Live;
+    HarmonyMode harmonyMode = HarmonyMode::Auto;
     float mix = 0.45f;           // 0..1
     float outputGainDb = 0.0f;   // -24..+12 dB
     float humanize = 0.20f;      // 0..1
+    float inputTuneAmount = 0.0f;// 0..1 pitch correction on lead input
     float glideMs = 28.0f;       // 0..150 ms pitch transition glide
     float naturalness = 0.35f;   // 0..1 formant follow + high-band vocal air
     float deEssAmount = 0.35f;   // 0..1 wet harmony bus sibilance control
@@ -64,8 +72,12 @@ struct TelemetrySnapshot
     bool isVoiced = false;
     int activeLatencySamples = 0;
     EngineMode activeMode = EngineMode::Live;
+    HarmonyMode activeHarmonyMode = HarmonyMode::Auto;
+    float inputTuneCorrectionCents = 0.0f;
     std::array<float, kMaxVoices> voiceRms{};
     std::array<float, kMaxVoices> voiceTargetSemitones{};
+    std::array<int, kMaxVoices> voiceMidiNote{};
+    std::array<bool, kMaxVoices> voiceMidiActive{};
 };
 
 inline float semitonesToRatio(float semitones) noexcept
@@ -116,6 +128,16 @@ inline float sanitizeSample(float x) noexcept
     if (!std::isfinite(x))
         return 0.0f;
     return std::clamp(x, -8.0f, 8.0f);
+}
+
+inline float softCeiling(float x) noexcept
+{
+    const float clean = sanitizeSample(x);
+    const float a = std::abs(clean);
+    if (a <= 0.80f)
+        return clean;
+    const float sign = (clean >= 0.0f) ? 1.0f : -1.0f;
+    return sign * (0.80f + 0.18f * std::tanh((a - 0.80f) / 0.18f));
 }
 
 inline int computeLiveLatencySamples(double sampleRate) noexcept

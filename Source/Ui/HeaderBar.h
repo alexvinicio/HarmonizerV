@@ -28,6 +28,21 @@ private:
     juce::String latencyLabel{ "10.7 ms" };
 };
 
+class HarmonyModePill final : public juce::Component
+{
+public:
+    explicit HarmonyModePill(juce::AudioProcessorValueTreeState& apvts);
+
+    void paint(juce::Graphics& g) override;
+    void mouseDown(const juce::MouseEvent& e) override;
+
+private:
+    void handleParameterChanged(float newValue);
+
+    std::unique_ptr<juce::ParameterAttachment> attachment;
+    int currentMode = 0; // 0 = Auto, 1 = MIDI
+};
+
 class HeaderBar final : public juce::Component
 {
 public:
@@ -56,6 +71,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> scaleAttachment;
 
     EngineModePill enginePill;
+    HarmonyModePill harmonyModePill;
 
     LabeledKnob mixKnob{ "MIX", Theme::liveAccent };
     LabeledKnob outKnob{ "OUT", Theme::textPrimary };
