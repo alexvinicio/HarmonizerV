@@ -606,11 +606,11 @@ void HeaderBar::resized()
     prevPresetBtn.setBounds(r.removeFromLeft(20).withSizeKeepingCentre(20, 26));
     r.removeFromLeft(2);
 
-    constexpr int fixedMiddleW = 229;
+    constexpr int fixedMiddleW = 235;
     const int flexAvail = std::max(170, r.getWidth() - fixedMiddleW);
-    const int presetWidth = std::clamp(flexAvail * 34 / 100, 72, 150);
-    const int scaleW      = std::clamp(flexAvail * 33 / 100, 70, 122);
-    const int noteW       = std::clamp(flexAvail - presetWidth - scaleW, 64, 98);
+    const int presetWidth = std::clamp(flexAvail * 34 / 100, 70, 150);
+    const int scaleW      = std::clamp(flexAvail * 33 / 100, 68, 122);
+    const int noteW       = std::clamp(flexAvail - presetWidth - scaleW, 62, 98);
 
     presetCombo.setBounds(r.removeFromLeft(presetWidth).withSizeKeepingCentre(presetWidth, 26));
     r.removeFromLeft(2);
@@ -622,7 +622,7 @@ void HeaderBar::resized()
     // Center Harmony Mode / Key / Scale / Detected note pill
     harmonyModePill.setBounds(r.removeFromLeft(84).withSizeKeepingCentre(84, 26));
     r.removeFromLeft(6);
-    keyCombo.setBounds(r.removeFromLeft(50).withSizeKeepingCentre(50, 26));
+    keyCombo.setBounds(r.removeFromLeft(56).withSizeKeepingCentre(56, 26));
     r.removeFromLeft(4);
     scaleCombo.setBounds(r.removeFromLeft(scaleW).withSizeKeepingCentre(scaleW, 26));
     r.removeFromLeft(6);

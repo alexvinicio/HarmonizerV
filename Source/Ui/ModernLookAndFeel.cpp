@@ -103,6 +103,14 @@ void ModernLookAndFeel::drawComboBox(juce::Graphics& g,
     g.strokePath(chevron, juce::PathStrokeType(1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
+void ModernLookAndFeel::positionComboBoxText(juce::ComboBox& box, juce::Label& label)
+{
+    label.setBounds(5, 1, std::max(8, box.getWidth() - 22), box.getHeight() - 2);
+    label.setBorderSize(juce::BorderSize<int>(0, 2, 0, 2));
+    label.setMinimumHorizontalScale(0.75f);
+    label.setFont(getComboBoxFont(box));
+}
+
 juce::Font ModernLookAndFeel::getComboBoxFont(juce::ComboBox&)
 {
     return Theme::makeFont(12.5f);

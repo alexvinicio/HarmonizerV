@@ -28,6 +28,7 @@ public:
                       int buttonX, int buttonY, int buttonW, int buttonH,
                       juce::ComboBox& box) override;
 
+    void positionComboBoxText(juce::ComboBox& box, juce::Label& label) override;
     juce::Font getComboBoxFont(juce::ComboBox& box) override;
 
     void drawPopupMenuBackground(juce::Graphics& g, int width, int height) override;
