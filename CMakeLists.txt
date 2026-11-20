@@ -70,7 +70,7 @@ target_compile_features(HarmonizerV_DSP PUBLIC cxx_std_20)
 
 if(MSVC)
     target_compile_definitions(HarmonizerV_DSP PUBLIC NOMINMAX _USE_MATH_DEFINES)
-    target_compile_options(HarmonizerV_DSP PRIVATE /W4)
+    target_compile_options(HarmonizerV_DSP PRIVATE /W4 /utf-8)
 else()
     target_compile_options(HarmonizerV_DSP PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -134,6 +134,10 @@ target_compile_definitions(HarmonizerV PUBLIC
 
 if(WIN32 AND HARMONIZERV_ENABLE_ASIO)
     target_compile_definitions(HarmonizerV PUBLIC JUCE_ASIO=1)
+endif()
+
+if(MSVC)
+    target_compile_options(HarmonizerV PRIVATE /utf-8)
 endif()
 
 target_link_libraries(HarmonizerV

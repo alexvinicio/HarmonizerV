@@ -14,7 +14,7 @@ HarmonyStage::HarmonyStage(HarmonizerVProcessor& proc)
     : processor(proc)
 {
     setMouseCursor(juce::MouseCursor::NormalCursor);
-    setTooltip("Drag orbs: Pan/Pitch · Wheel: Level · Snapshots A–D: Click recall, Shift+Click store, Right-Click copy/clear");
+    setTooltip("Drag orbs: Pan/Pitch | Wheel: Level | Snapshots A-D: Click recall, Shift+Click store, Right-Click copy/clear");
 }
 
 void HarmonyStage::setSelectedVoice(int voiceIndex)
@@ -315,8 +315,8 @@ void HarmonyStage::paint(juce::Graphics& g)
         g.setColour(isMidiMode ? Theme::getVoiceColour(0).withAlpha(0.85f) : Theme::textMuted);
         g.setFont(Theme::makeFont(10.0f, isMidiMode));
         const juce::String hintText = isMidiMode
-            ? "MIDI · Play Chords · Drag X: Pan · Wheel: Level"
-            : "Drag: Pan / Pitch · Wheel: Level · Dbl-Click: On/Off";
+            ? "MIDI | Play Chords | Drag X: Pan | Wheel: Level"
+            : "Drag: Pan / Pitch | Wheel: Level | Dbl-Click: On/Off";
         g.drawFittedText(hintText,
                          hintRect.toNearestInt(),
                          juce::Justification::centred, 1);

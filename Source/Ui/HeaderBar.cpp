@@ -35,7 +35,7 @@ EngineModePill::EngineModePill(juce::AudioProcessorValueTreeState& apvts)
     }
 
     setMouseCursor(juce::MouseCursor::PointingHandCursor);
-    setTooltip("LIVE / STUDIO engine · Click latency badge in LIVE mode to change DSP buffer (2.7–10.7 ms)");
+    setTooltip("LIVE / STUDIO engine | Click latency badge in LIVE mode to change DSP buffer (2.7-10.7 ms)");
 }
 
 void EngineModePill::handleModeChanged(float newValue)
@@ -62,10 +62,10 @@ void EngineModePill::setLatencyText(const juce::String& text)
 void EngineModePill::openLiveBufferMenu()
 {
     juce::PopupMenu menu;
-    menu.addItem(1, "Ultra · 2.7 ms (128 smp)", true, currentLiveBuffer == 0);
-    menu.addItem(2, "Fast · 5.3 ms (256 smp)",  true, currentLiveBuffer == 1);
-    menu.addItem(3, "Low · 8.0 ms (384 smp)",   true, currentLiveBuffer == 2);
-    menu.addItem(4, "Safe · 10.7 ms (512 smp)", true, currentLiveBuffer == 3);
+    menu.addItem(1, "Ultra - 2.7 ms (128 smp)", true, currentLiveBuffer == 0);
+    menu.addItem(2, "Fast - 5.3 ms (256 smp)",  true, currentLiveBuffer == 1);
+    menu.addItem(3, "Low - 8.0 ms (384 smp)",   true, currentLiveBuffer == 2);
+    menu.addItem(4, "Safe - 10.7 ms (512 smp)", true, currentLiveBuffer == 3);
 
     menu.showMenuAsync(
         juce::PopupMenu::Options().withTargetComponent(this),
@@ -448,7 +448,7 @@ void HeaderBar::paint(juce::Graphics& g)
         if (latestSnap.isVoiced && latestSnap.detectedHz > 20.0f)
         {
             noteText = midiToNoteName(latestSnap.detectedMidi)
-                     + " · " + juce::String(std::lround(latestSnap.detectedHz)) + "Hz";
+                     + " | " + juce::String(std::lround(latestSnap.detectedHz)) + " Hz";
         }
         g.setColour(latestSnap.isVoiced ? Theme::textPrimary : Theme::textMuted);
         g.setFont(Theme::makeFont(11.5f, latestSnap.isVoiced));
