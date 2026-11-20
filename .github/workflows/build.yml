@@ -19,7 +19,7 @@ jobs:
             generator_args: -A x64
             vst3_path: build/HarmonizerV_artefacts/Release/VST3/HarmonizerV.vst3
             standalone_path: build/HarmonizerV_artefacts/Release/Standalone/HarmonizerV.exe
-          - os: macos-14
+          - os: macos-15
             name: macOS-Universal
             generator_args: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
             vst3_path: build/HarmonizerV_artefacts/Release/VST3/HarmonizerV.vst3
@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DHARMONIZERV_BUILD_TESTS=ON ${{ matrix.generator_args }}
@@ -42,7 +42,7 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Download and run pluginval (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $url = "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip"
@@ -52,7 +52,7 @@ jobs:
           & $exe.FullName --strictness-level 5 --validate-in-process "${{ matrix.vst3_path }}"
 
       - name: Download and run pluginval (macOS)
-        if: matrix.os == 'macos-14'
+        if: runner.os == 'macOS'
         run: |
           curl -L -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip"
           unzip -q pluginval.zip -d pluginval_bin
@@ -61,7 +61,7 @@ jobs:
           "$APP/Contents/MacOS/pluginval" --strictness-level 5 --validate-in-process "${{ matrix.au_path }}"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: HarmonizerV-${{ matrix.name }}
           path: |
