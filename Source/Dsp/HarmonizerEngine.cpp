@@ -86,6 +86,7 @@ void HarmonizerEngine::reset() noexcept
     smoothedCorrectionSt = 0.0f;
     smoothedTuneBlend = 0.0f;
     smoothedBusTrim = 1.0f;
+    smoothedBypassWet = 1.0f;
     firstBlockAfterReset = true;
 
     telemetry.inputRms.store(0.0f, std::memory_order_relaxed);
@@ -94,6 +95,7 @@ void HarmonizerEngine::reset() noexcept
     telemetry.outputPeakR.store(0.0f, std::memory_order_relaxed);
     telemetry.detectedHz.store(0.0f, std::memory_order_relaxed);
     telemetry.isVoiced.store(false, std::memory_order_relaxed);
+    telemetry.bypassed.store(false, std::memory_order_relaxed);
     telemetry.inputTuneCorrectionCents.store(0.0f, std::memory_order_relaxed);
     for (int v = 0; v < kMaxVoices; ++v)
     {
@@ -124,6 +126,7 @@ TelemetrySnapshot HarmonizerEngine::getTelemetry() const noexcept
     snap.detectedMidi = telemetry.detectedMidi.load(std::memory_order_relaxed);
     snap.voicedClarity = telemetry.voicedClarity.load(std::memory_order_relaxed);
     snap.isVoiced = telemetry.isVoiced.load(std::memory_order_relaxed);
+    snap.bypassed = telemetry.bypassed.load(std::memory_order_relaxed);
     snap.activeLatencySamples = telemetry.activeLatencySamples.load(std::memory_order_relaxed);
     snap.activeMode = static_cast<EngineMode>(telemetry.activeMode.load(std::memory_order_relaxed));
     snap.activeHarmonyMode = static_cast<HarmonyMode>(telemetry.activeHarmonyMode.load(std::memory_order_relaxed));
@@ -472,12 +475,14 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
 
     const float targetMix = std::clamp(globalParams.mix, 0.0f, 1.0f);
     const float targetOutGain = dbToGain(std::clamp(globalParams.outputGainDb, -24.0f, 12.0f));
+    const float targetBypassWet = globalParams.bypass ? 0.0f : 1.0f;
 
     if (firstBlockAfterReset)
     {
         smoothedMix = targetMix;
         smoothedOutGain = targetOutGain;
         smoothedTuneBlend = targetTuneBlend;
+        smoothedBypassWet = targetBypassWet;
         firstBlockAfterReset = false;
     }
 
@@ -490,6 +495,7 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
         smoothedMix += paramSmoothAlpha * (targetMix - smoothedMix);
         smoothedOutGain += paramSmoothAlpha * (targetOutGain - smoothedOutGain);
         smoothedTuneBlend += paramSmoothAlpha * (targetTuneBlend - smoothedTuneBlend);
+        smoothedBypassWet += paramSmoothAlpha * (targetBypassWet - smoothedBypassWet);
 
         float switchGain = 1.0f;
         if (switchState == SwitchState::FadingOut)
@@ -515,8 +521,18 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
         const float dryWeight = 1.0f - smoothedMix;
         const float wetWeight = smoothedMix;
 
-        const float outL = softCeiling((dryWeight * leadL + wetWeight * wetBusL[static_cast<size_t>(i)]) * smoothedOutGain * switchGain);
-        const float outR = softCeiling((dryWeight * leadR + wetWeight * wetBusR[static_cast<size_t>(i)]) * smoothedOutGain * switchGain);
+        const float procL = softCeiling((dryWeight * leadL + wetWeight * wetBusL[static_cast<size_t>(i)]) * smoothedOutGain * switchGain);
+        const float procR = softCeiling((dryWeight * leadR + wetWeight * wetBusR[static_cast<size_t>(i)]) * smoothedOutGain * switchGain);
+
+        const float dryBypassL = rawDryL * switchGain;
+        const float dryBypassR = rawDryR * switchGain;
+
+        const float outL = (smoothedBypassWet <= 1.0e-5f)
+            ? dryBypassL
+            : (dryBypassL + smoothedBypassWet * (procL - dryBypassL));
+        const float outR = (smoothedBypassWet <= 1.0e-5f)
+            ? dryBypassR
+            : (dryBypassR + smoothedBypassWet * (procR - dryBypassR));
 
         if (numOutChannels >= 2)
         {
@@ -544,6 +560,7 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
     telemetry.detectedMidi.store(pitchEst.midiNote, std::memory_order_relaxed);
     telemetry.voicedClarity.store(pitchEst.clarity, std::memory_order_relaxed);
     telemetry.isVoiced.store(pitchEst.isVoiced, std::memory_order_relaxed);
+    telemetry.bypassed.store(globalParams.bypass, std::memory_order_relaxed);
     telemetry.activeLatencySamples.store(activeLatencySamples, std::memory_order_relaxed);
     telemetry.activeMode.store(static_cast<int>(activeMode), std::memory_order_relaxed);
     telemetry.activeHarmonyMode.store(static_cast<int>(globalParams.harmonyMode), std::memory_order_relaxed);

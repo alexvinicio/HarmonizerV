@@ -21,6 +21,7 @@ inline constexpr const char* glideMs     = "glide_ms";
 inline constexpr const char* naturalness = "natural";
 inline constexpr const char* deEssAmount = "deess";
 inline constexpr const char* spaceAmount = "space";
+inline constexpr const char* bypass      = "bypass";
 
 inline constexpr const char* vEnabled  = "enabled";
 inline constexpr const char* vMute     = "mute";

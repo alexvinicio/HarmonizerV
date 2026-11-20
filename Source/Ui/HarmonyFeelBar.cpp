@@ -26,7 +26,7 @@ HarmonyFeelBar::FeelPillSlider::FeelPillSlider(juce::AudioProcessorValueTreeStat
         attachment = std::make_unique<juce::ParameterAttachment>(
             *param,
             [this](float newValue) { handleValueChanged(newValue); },
-            nullptr);
+            apvts.undoManager);
         attachment->sendInitialUpdate();
     }
     setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);

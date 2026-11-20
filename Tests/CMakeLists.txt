@@ -3,6 +3,7 @@ add_executable(HarmonizerV_Tests
     ScaleHarmonizerTests.cpp
     TdPsolaTests.cpp
     SnapshotBankTests.cpp
+    MidiControlMapTests.cpp
     HarmonizerEngineTests.cpp
 )
 

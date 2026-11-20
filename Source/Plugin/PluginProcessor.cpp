@@ -33,9 +33,10 @@ HarmonizerVProcessor::HarmonizerVProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts(*this, nullptr, "HarmonizerVState", createParameterLayout()),
+      apvts(*this, &undoManager, "HarmonizerVState", createParameterLayout()),
       snapshotManager(apvts),
-      presetManager(apvts, snapshotManager)
+      liveMidiController(apvts, snapshotManager),
+      presetManager(apvts, snapshotManager, liveMidiController)
 {
     keyParam         = apvts.getRawParameterValue(params::key);
     scaleParam       = apvts.getRawParameterValue(params::scale);
@@ -51,6 +52,7 @@ HarmonizerVProcessor::HarmonizerVProcessor()
     naturalParam    = apvts.getRawParameterValue(params::naturalness);
     deEssParam      = apvts.getRawParameterValue(params::deEssAmount);
     spaceParam      = apvts.getRawParameterValue(params::spaceAmount);
+    bypassParam     = apvts.getRawParameterValue(params::bypass);
 
     for (int v = 0; v < dsp::kExposedVoicesV1; ++v)
     {
@@ -144,6 +146,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout HarmonizerVProcessor::create
         juce::ParameterID{ params::spaceAmount, 1 }, "Space",
         juce::NormalisableRange<float>(0.0f, 100.0f, 0.5f), 18.0f,
         juce::AudioParameterFloatAttributes().withLabel("%")));
+
+    p.push_back(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID{ params::bypass, 1 }, "Bypass", false));
 
     for (int v = 0; v < dsp::kExposedVoicesV1; ++v)
     {
@@ -249,6 +254,9 @@ void HarmonizerVProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     for (const auto metadata : midiMessages)
     {
         const auto msg = metadata.getMessage();
+        if (liveMidiController.processMidiMessageOnAudioThread(msg))
+            continue;
+
         if (msg.isNoteOn())
             engine.handleNoteOn(msg.getNoteNumber(), msg.getFloatVelocity());
         else if (msg.isNoteOff())
@@ -298,6 +306,7 @@ void HarmonizerVProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     gp.naturalness  = naturalParam->load(std::memory_order_relaxed) * 0.01f;
     gp.deEssAmount  = deEssParam->load(std::memory_order_relaxed) * 0.01f;
     gp.spaceAmount  = spaceParam->load(std::memory_order_relaxed) * 0.01f;
+    gp.bypass       = bypassParam->load(std::memory_order_relaxed) >= 0.5f;
 
     std::array<dsp::VoiceParams, dsp::kMaxVoices> vp{};
     for (int v = 0; v < dsp::kExposedVoicesV1; ++v)
@@ -365,6 +374,7 @@ void HarmonizerVProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
     snapshotManager.writeToStateTree(state);
+    liveMidiController.writeToStateTree(state);
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     if (xml != nullptr)
         copyXmlToBinary(*xml, destData);
@@ -382,9 +392,14 @@ void HarmonizerVProcessor::setStateInformation(const void* data, int sizeInBytes
             if (snapshotsNode.isValid())
                 tree.removeChild(snapshotsNode, nullptr);
 
+            auto midiMapNode = tree.getChildWithName("MIDIMAP");
+            if (midiMapNode.isValid())
+                tree.removeChild(midiMapNode, nullptr);
+
             snapshotManager.beginExternalStateLoad();
             apvts.replaceState(tree);
             snapshotManager.loadFromStateTree(snapshotsNode);
+            liveMidiController.loadFromStateTree(midiMapNode);
             snapshotManager.endExternalStateLoad();
         }
     }

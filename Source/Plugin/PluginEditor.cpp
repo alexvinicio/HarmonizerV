@@ -27,6 +27,7 @@ HarmonizerVEditor::HarmonizerVEditor(HarmonizerVProcessor& p)
     setResizable(true, true);
     setResizeLimits(840, 510, 1400, 900);
     setSize(920, 598);
+    setWantsKeyboardFocus(true);
 
     startTimerHz(30);
 }
@@ -60,6 +61,40 @@ void HarmonizerVEditor::resized()
     harmonyFeelBar.setBounds(r.removeFromBottom(36));
     r.removeFromBottom(8);
     harmonyStage.setBounds(r);
+}
+
+bool HarmonizerVEditor::keyPressed(const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::escapeKey && proc.getLiveMidiController().getLearningTarget() >= 0)
+    {
+        proc.getLiveMidiController().cancelLearn();
+        headerBar.repaint();
+        harmonyStage.repaint();
+        return true;
+    }
+
+    const auto mods = key.getModifiers();
+    if (mods.isCommandDown())
+    {
+        const auto ch = key.getTextCharacter();
+        if ((ch == 'z' || ch == 'Z') && mods.isShiftDown())
+        {
+            proc.getUndoManager().redo();
+            return true;
+        }
+        if (ch == 'z' || ch == 'Z')
+        {
+            proc.getUndoManager().undo();
+            return true;
+        }
+        if (ch == 'y' || ch == 'Y')
+        {
+            proc.getUndoManager().redo();
+            return true;
+        }
+    }
+
+    return AudioProcessorEditor::keyPressed(key);
 }
 
 } // namespace harmonizer

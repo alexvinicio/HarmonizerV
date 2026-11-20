@@ -21,7 +21,7 @@ EngineModePill::EngineModePill(juce::AudioProcessorValueTreeState& apvts)
         modeAttachment = std::make_unique<juce::ParameterAttachment>(
             *param,
             [this](float newValue) { handleModeChanged(newValue); },
-            nullptr);
+            apvts.undoManager);
         modeAttachment->sendInitialUpdate();
     }
 
@@ -30,7 +30,7 @@ EngineModePill::EngineModePill(juce::AudioProcessorValueTreeState& apvts)
         liveBufferAttachment = std::make_unique<juce::ParameterAttachment>(
             *bufParam,
             [this](float newValue) { handleLiveBufferChanged(newValue); },
-            nullptr);
+            apvts.undoManager);
         liveBufferAttachment->sendInitialUpdate();
     }
 
@@ -182,7 +182,7 @@ HarmonyModePill::HarmonyModePill(juce::AudioProcessorValueTreeState& apvts)
         attachment = std::make_unique<juce::ParameterAttachment>(
             *param,
             [this](float newValue) { handleParameterChanged(newValue); },
-            nullptr);
+            apvts.undoManager);
         attachment->sendInitialUpdate();
     }
     setMouseCursor(juce::MouseCursor::PointingHandCursor);
@@ -236,14 +236,144 @@ void HarmonyModePill::mouseDown(const juce::MouseEvent& e)
 }
 
 // ============================================================================
+// PowerBypassButton
+// ============================================================================
+
+PowerBypassButton::PowerBypassButton(juce::AudioProcessorValueTreeState& apvts, LiveMidiController& liveMidi)
+    : liveMidiController(liveMidi),
+      undoManager(apvts.undoManager)
+{
+    if (auto* param = apvts.getParameter(params::bypass))
+    {
+        attachment = std::make_unique<juce::ParameterAttachment>(
+            *param,
+            [this](float newValue) { handleBypassChanged(newValue); },
+            apvts.undoManager);
+        attachment->sendInitialUpdate();
+    }
+    setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    setTooltip("Global Bypass (Click: Toggle | Right-Click: MIDI Learn)");
+}
+
+void PowerBypassButton::setActiveColour(juce::Colour c)
+{
+    if (activeColour != c)
+    {
+        activeColour = c;
+        repaint();
+    }
+}
+
+void PowerBypassButton::handleBypassChanged(float newValue)
+{
+    bypassed = (newValue >= 0.5f);
+    repaint();
+}
+
+void PowerBypassButton::mouseEnter(const juce::MouseEvent&)
+{
+    hovered = true;
+    repaint();
+}
+
+void PowerBypassButton::mouseExit(const juce::MouseEvent&)
+{
+    hovered = false;
+    repaint();
+}
+
+void PowerBypassButton::openContextMenu()
+{
+    const bool isLearning = (liveMidiController.getLearningTarget() == static_cast<int>(dsp::LiveMidiTarget::Bypass));
+    const auto binding = liveMidiController.getBinding(dsp::LiveMidiTarget::Bypass);
+    const bool hasBinding = dsp::isValidBinding(binding);
+
+    juce::PopupMenu menu;
+    menu.addItem(100, "MIDI: " + liveMidiController.getBindingLabel(dsp::LiveMidiTarget::Bypass), false, false);
+    menu.addSeparator();
+    menu.addItem(1, isLearning ? "Cancel MIDI Learn" : "MIDI Learn Bypass", true, isLearning);
+    menu.addItem(2, "Clear MIDI Binding", hasBinding, false);
+
+    menu.showMenuAsync(
+        juce::PopupMenu::Options().withTargetComponent(this),
+        [safeThis = juce::Component::SafePointer<PowerBypassButton>(this), isLearning](int selectedId)
+        {
+            if (safeThis == nullptr || selectedId <= 0)
+                return;
+            if (selectedId == 1)
+            {
+                if (isLearning)
+                    safeThis->liveMidiController.cancelLearn();
+                else
+                    safeThis->liveMidiController.startLearn(dsp::LiveMidiTarget::Bypass);
+            }
+            else if (selectedId == 2)
+            {
+                safeThis->liveMidiController.clearBinding(dsp::LiveMidiTarget::Bypass);
+            }
+            safeThis->repaint();
+        });
+}
+
+void PowerBypassButton::mouseDown(const juce::MouseEvent& e)
+{
+    if (e.mods.isRightButtonDown())
+    {
+        openContextMenu();
+        return;
+    }
+
+    if (liveMidiController.getLearningTarget() == static_cast<int>(dsp::LiveMidiTarget::Bypass))
+    {
+        liveMidiController.cancelLearn();
+        repaint();
+        return;
+    }
+
+    if (attachment == nullptr)
+        return;
+
+    if (undoManager != nullptr)
+        undoManager->beginNewTransaction("Toggle Bypass");
+    attachment->setValueAsCompleteGesture(bypassed ? 0.0f : 1.0f);
+}
+
+void PowerBypassButton::paint(juce::Graphics& g)
+{
+    const auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+    const bool learning = (liveMidiController.getLearningTarget() == static_cast<int>(dsp::LiveMidiTarget::Bypass));
+
+    const auto col = learning ? Theme::warnAccent
+                              : (bypassed ? Theme::muteAccent : activeColour);
+
+    g.setColour(hovered ? Theme::bgElevated.brighter(0.10f) : Theme::bgElevated);
+    g.fillEllipse(bounds);
+    g.setColour(col.withAlpha(learning ? 0.95f : (hovered ? 0.85f : 0.45f)));
+    g.drawEllipse(bounds, learning ? 1.5f : 1.0f);
+
+    const auto c = bounds.getCentre();
+    const float r = std::min(bounds.getWidth(), bounds.getHeight()) * 0.27f;
+
+    juce::Path icon;
+    icon.addCentredArc(c.x, c.y, r, r, 0.0f, 0.60f, juce::MathConstants<float>::twoPi - 0.60f, true);
+    icon.startNewSubPath(c.x, c.y - r * 1.15f);
+    icon.lineTo(c.x, c.y - r * 0.15f);
+
+    g.setColour(bypassed ? col.withAlpha(0.75f) : col);
+    g.strokePath(icon, juce::PathStrokeType(1.75f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+
+// ============================================================================
 // HeaderBar
 // ============================================================================
 
 HeaderBar::HeaderBar(HarmonizerVProcessor& proc)
     : processor(proc),
+      powerBypassBtn(proc.getApvts(), proc.getLiveMidiController()),
       enginePill(proc.getApvts()),
       harmonyModePill(proc.getApvts())
 {
+    addAndMakeVisible(powerBypassBtn);
     addAndMakeVisible(prevPresetBtn);
     addAndMakeVisible(presetCombo);
     addAndMakeVisible(nextPresetBtn);
@@ -366,7 +496,9 @@ void HeaderBar::updateTelemetry(const dsp::TelemetrySnapshot& snap)
         ? juce::String(latMs, 1) + " ms"
         : juce::String(latMs, 1) + " ms PDC");
 
-    mixKnob.setAccentColour(snap.activeMode == dsp::EngineMode::Live ? Theme::liveAccent : Theme::studioAccent);
+    const auto modeAccent = (snap.activeMode == dsp::EngineMode::Live) ? Theme::liveAccent : Theme::studioAccent;
+    powerBypassBtn.setActiveColour(modeAccent);
+    mixKnob.setAccentColour(modeAccent);
 
     // Smooth decay output peak meters
     meterLevelL = std::max(snap.outputPeakL, meterLevelL * 0.80f);
@@ -388,16 +520,18 @@ void HeaderBar::resized()
     enginePill.setBounds(r.removeFromRight(112).withSizeKeepingCentre(112, 42));
     r.removeFromRight(8);
 
-    // Left side brand + presets
-    r.removeFromLeft(102); // Space for brand wordmark painted cleanly
+    // Left side bypass button + brand wordmark + presets
+    powerBypassBtn.setBounds(r.removeFromLeft(22).withSizeKeepingCentre(22, 22));
+    r.removeFromLeft(4);
+    r.removeFromLeft(84); // Space for "HarmonizerV" wordmark
     prevPresetBtn.setBounds(r.removeFromLeft(20).withSizeKeepingCentre(20, 26));
     r.removeFromLeft(2);
 
     const int fixedMiddleW = 84 + 6 + 50 + 4 + 38 + 20 + 2 + 4 + 8 + 8;
-    const int flexAvail = std::max(180, r.getWidth() - fixedMiddleW);
-    const int presetWidth = std::clamp(flexAvail * 36 / 100, 96, 150);
-    const int scaleW      = std::clamp(flexAvail * 36 / 100, 90, 122);
-    const int noteW       = std::clamp(flexAvail - presetWidth - scaleW, 76, 98);
+    const int flexAvail = std::max(170, r.getWidth() - fixedMiddleW);
+    const int presetWidth = std::clamp(flexAvail * 36 / 100, 86, 150);
+    const int scaleW      = std::clamp(flexAvail * 36 / 100, 82, 122);
+    const int noteW       = std::clamp(flexAvail - presetWidth - scaleW, 66, 98);
 
     presetCombo.setBounds(r.removeFromLeft(presetWidth).withSizeKeepingCentre(presetWidth, 26));
     r.removeFromLeft(2);
@@ -425,15 +559,11 @@ void HeaderBar::paint(juce::Graphics& g)
     g.setColour(Theme::borderSubtle);
     g.drawRoundedRectangle(bounds.reduced(0.5f), Theme::kCardRadius, 1.0f);
 
-    // Brand logo
-    const auto brandRect = getLocalBounds().reduced(10, 8).withWidth(98);
-    const auto accent = (latestSnap.activeMode == dsp::EngineMode::Live) ? Theme::liveAccent : Theme::studioAccent;
-    g.setColour(accent);
-    g.fillEllipse(static_cast<float>(brandRect.getX()), static_cast<float>(brandRect.getCentreY() - 4), 8.0f, 8.0f);
-
-    g.setColour(Theme::textPrimary);
+    // Brand wordmark (power/bypass button sits to the left)
+    const auto brandRect = getLocalBounds().reduced(10, 8).withTrimmedLeft(26).withWidth(84);
+    g.setColour(latestSnap.bypassed ? Theme::textMuted : Theme::textPrimary);
     g.setFont(Theme::makeFont(13.5f, true));
-    g.drawFittedText("HarmonizerV", brandRect.withTrimmedLeft(12), juce::Justification::centredLeft, 1);
+    g.drawFittedText("HarmonizerV", brandRect, juce::Justification::centredLeft, 1);
 
     // Live detected pitch pill
     if (!notePillBounds.isEmpty())

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Dsp/HarmonizerEngine.h"
+#include "Plugin/LiveMidiController.h"
+#include "Plugin/ParameterIds.h"
 #include "Plugin/PresetManager.h"
 #include "Plugin/SnapshotManager.h"
 
@@ -44,8 +46,12 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    juce::AudioProcessorParameter* getBypassParameter() const override { return apvts.getParameter(params::bypass); }
+
+    juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     juce::AudioProcessorValueTreeState& getApvts() noexcept { return apvts; }
     SnapshotManager& getSnapshotManager() noexcept { return snapshotManager; }
+    LiveMidiController& getLiveMidiController() noexcept { return liveMidiController; }
     PresetManager& getPresetManager() noexcept { return presetManager; }
     dsp::TelemetrySnapshot getTelemetry() const noexcept { return engine.getTelemetry(); }
     int getLiveLatencySamples() const noexcept { return engine.getLiveLatencySamples(); }
@@ -72,8 +78,10 @@ private:
         std::atomic<float>* gainDb = nullptr;
     };
 
+    juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
     SnapshotManager snapshotManager;
+    LiveMidiController liveMidiController;
     PresetManager presetManager;
     dsp::HarmonizerEngine engine;
 
@@ -91,6 +99,7 @@ private:
     std::atomic<float>* naturalParam = nullptr;
     std::atomic<float>* deEssParam = nullptr;
     std::atomic<float>* spaceParam = nullptr;
+    std::atomic<float>* bypassParam = nullptr;
 
     std::array<VoiceAtomics, dsp::kExposedVoicesV1> voiceAtomics{};
     std::atomic<double> currentSampleRate{ 48000.0 };

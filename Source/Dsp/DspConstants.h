@@ -67,6 +67,7 @@ struct GlobalParams
     float naturalness = 0.35f;   // 0..1 formant follow + high-band vocal air
     float deEssAmount = 0.35f;   // 0..1 wet harmony bus sibilance control
     float spaceAmount = 0.18f;   // 0..1 wet harmony studio vocal space
+    bool bypass = false;
 };
 
 struct TelemetrySnapshot
@@ -79,6 +80,7 @@ struct TelemetrySnapshot
     float detectedMidi = 60.0f;
     float voicedClarity = 0.0f;
     bool isVoiced = false;
+    bool bypassed = false;
     int activeLatencySamples = 0;
     EngineMode activeMode = EngineMode::Live;
     HarmonyMode activeHarmonyMode = HarmonyMode::Auto;

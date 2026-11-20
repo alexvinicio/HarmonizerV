@@ -14,7 +14,7 @@ HarmonyStage::HarmonyStage(HarmonizerVProcessor& proc)
     : processor(proc)
 {
     setMouseCursor(juce::MouseCursor::NormalCursor);
-    setTooltip("Drag orbs: Pan/Pitch | Wheel: Level | Snapshots A-D: Click recall, Shift+Click store, Right-Click copy/clear");
+    setTooltip("Drag orbs: Pan/Pitch | Wheel: Level | Undo/Redo arrows | Snapshots A-D: Click recall, Shift+Click store, Right-Click MIDI Learn");
 }
 
 void HarmonyStage::setSelectedVoice(int voiceIndex)
@@ -151,10 +151,12 @@ void HarmonyStage::resized()
     }
 
     snapLabelRect = juce::Rectangle<float>(snapPillRects[0].getX() - 38.0f, top.getY(), 34.0f, 24.0f);
-    hintRect = juce::Rectangle<float>(pillRects[dsp::kExposedVoicesV1 - 1].getRight() + 8.0f,
-                                      top.getY(),
-                                      std::max(0.0f, snapLabelRect.getX() - pillRects[dsp::kExposedVoicesV1 - 1].getRight() - 16.0f),
-                                      24.0f);
+    redoBtnRect   = juce::Rectangle<float>(snapLabelRect.getX() - 32.0f, top.getY(), 22.0f, 24.0f);
+    undoBtnRect   = juce::Rectangle<float>(redoBtnRect.getX() - 25.0f, top.getY(), 22.0f, 24.0f);
+    hintRect      = juce::Rectangle<float>(pillRects[dsp::kExposedVoicesV1 - 1].getRight() + 8.0f,
+                                           top.getY(),
+                                           std::max(0.0f, undoBtnRect.getX() - pillRects[dsp::kExposedVoicesV1 - 1].getRight() - 16.0f),
+                                           24.0f);
 }
 
 void HarmonyStage::showSnapshotContextMenu(int slotIndex)
@@ -164,8 +166,12 @@ void HarmonyStage::showSnapshotContextMenu(int slotIndex)
         return;
 
     const auto& snapMgr = processor.getSnapshotManager();
+    const auto& liveMidi = processor.getLiveMidiController();
     const int activeIdx = snapMgr.getActiveSnapshotIndex();
     const juce::String targetLetter = kLetters[static_cast<size_t>(slotIndex)];
+    const auto midiTarget = static_cast<dsp::LiveMidiTarget>(slotIndex);
+    const bool isLearning = (liveMidi.getLearningTarget() == slotIndex);
+    const bool hasBinding = dsp::isValidBinding(liveMidi.getBinding(midiTarget));
 
     juce::PopupMenu menu;
     menu.addItem(1, "Store Current into " + targetLetter);
@@ -180,21 +186,39 @@ void HarmonyStage::showSnapshotContextMenu(int slotIndex)
     menu.addSeparator();
     const bool canClear = snapMgr.isSnapshotPopulated(slotIndex) && (slotIndex != activeIdx);
     menu.addItem(20, "Clear " + targetLetter, canClear, false);
+    menu.addSeparator();
+    menu.addItem(100, "MIDI: " + liveMidi.getBindingLabel(midiTarget), false, false);
+    menu.addItem(30, isLearning ? "Cancel MIDI Learn" : ("MIDI Learn " + targetLetter), true, isLearning);
+    menu.addItem(31, "Reset MIDI to PC " + juce::String(slotIndex + 1));
+    menu.addItem(32, "Clear MIDI Binding", hasBinding, false);
 
     menu.showMenuAsync(
         juce::PopupMenu::Options().withTargetScreenArea(localAreaToGlobal(snapPillRects[static_cast<size_t>(slotIndex)].toNearestInt())),
-        [safeThis = juce::Component::SafePointer<HarmonyStage>(this), slotIndex](int selectedId)
+        [safeThis = juce::Component::SafePointer<HarmonyStage>(this), slotIndex, isLearning, midiTarget](int selectedId)
         {
             if (safeThis == nullptr || selectedId <= 0)
                 return;
 
             auto& mgr = safeThis->processor.getSnapshotManager();
+            auto& midi = safeThis->processor.getLiveMidiController();
+
             if (selectedId == 1)
                 mgr.storeSnapshot(slotIndex);
             else if (selectedId >= 10 && selectedId < 10 + dsp::kNumSnapshots)
                 mgr.copySnapshot(selectedId - 10, slotIndex);
             else if (selectedId == 20)
                 mgr.clearSnapshot(slotIndex);
+            else if (selectedId == 30)
+            {
+                if (isLearning)
+                    midi.cancelLearn();
+                else
+                    midi.startLearn(midiTarget);
+            }
+            else if (selectedId == 31)
+                midi.resetDefaultBinding(midiTarget);
+            else if (selectedId == 32)
+                midi.clearBinding(midiTarget);
 
             safeThis->repaint();
         });
@@ -257,8 +281,43 @@ void HarmonyStage::paint(juce::Graphics& g)
                          juce::Justification::centredLeft, 1);
     }
 
+    // Undo / Redo compact vector buttons
+    const auto& um = processor.getUndoManager();
+    auto drawUndoRedoBtn = [&](const juce::Rectangle<float>& rect, bool isUndo, bool enabled)
+    {
+        g.setColour(Theme::bgCanvas.withAlpha(0.75f));
+        g.fillRoundedRectangle(rect, 5.5f);
+        g.setColour(enabled ? Theme::borderFocus : Theme::borderSubtle.withAlpha(0.6f));
+        g.drawRoundedRectangle(rect.reduced(0.5f), 5.5f, 1.0f);
+
+        const auto c = rect.getCentre();
+        const float sign = isUndo ? -1.0f : 1.0f; // -1 = points left (Undo), +1 = points right (Redo)
+        const float tipX = c.x + sign * 4.8f;
+        const float tipY = c.y - 2.0f;
+        const float loopX = c.x - sign * 4.2f;
+
+        juce::Path p;
+        p.startNewSubPath(c.x, c.y + 4.2f);
+        p.lineTo(c.x - sign * 1.2f, c.y + 4.2f);
+        p.quadraticTo(loopX, c.y + 4.2f, loopX, c.y + 1.1f);
+        p.quadraticTo(loopX, tipY, c.x - sign * 1.2f, tipY);
+        p.lineTo(tipX, tipY);
+
+        p.startNewSubPath(tipX - sign * 2.6f, tipY - 2.5f);
+        p.lineTo(tipX, tipY);
+        p.lineTo(tipX - sign * 2.6f, tipY + 2.5f);
+
+        g.setColour(enabled ? Theme::textPrimary : Theme::textMuted.withAlpha(0.38f));
+        g.strokePath(p, juce::PathStrokeType(1.45f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    };
+
+    drawUndoRedoBtn(undoBtnRect, true,  um.canUndo());
+    drawUndoRedoBtn(redoBtnRect, false, um.canRedo());
+
     // Snapshot Scene Pills (A / B / C / D) top-right
     const auto& snapMgr = processor.getSnapshotManager();
+    const auto& liveMidi = processor.getLiveMidiController();
+    const int learningTarget = liveMidi.getLearningTarget();
     const int activeSnap = snapMgr.getActiveSnapshotIndex();
     const auto modeAccent = (latestSnap.activeMode == dsp::EngineMode::Live) ? Theme::liveAccent : Theme::studioAccent;
 
@@ -270,10 +329,19 @@ void HarmonyStage::paint(juce::Graphics& g)
     for (int s = 0; s < dsp::kNumSnapshots; ++s)
     {
         const auto sr = snapPillRects[static_cast<size_t>(s)];
+        const bool isLearning = (learningTarget == s);
         const bool isActive = (s == activeSnap);
         const bool isPopulated = snapMgr.isSnapshotPopulated(s);
 
-        if (isActive)
+        if (isLearning)
+        {
+            g.setColour(Theme::warnAccent.withAlpha(0.28f));
+            g.fillRoundedRectangle(sr, 5.5f);
+            g.setColour(Theme::warnAccent);
+            g.drawRoundedRectangle(sr.reduced(0.5f), 5.5f, 1.5f);
+            g.setFont(Theme::makeFont(11.0f, true));
+        }
+        else if (isActive)
         {
             g.setColour(modeAccent);
             g.fillRoundedRectangle(sr, 5.5f);
@@ -309,14 +377,31 @@ void HarmonyStage::paint(juce::Graphics& g)
                          juce::Justification::centred, 1);
     }
 
-    // Subtle hint centered cleanly between voice pills and snapshot pills
+    // Subtle hint or active MIDI Learn prompt centered cleanly between voice pills and undo/snap
     if (hintRect.getWidth() >= 140.0f)
     {
-        g.setColour(isMidiMode ? Theme::getVoiceColour(0).withAlpha(0.85f) : Theme::textMuted);
-        g.setFont(Theme::makeFont(10.0f, isMidiMode));
-        const juce::String hintText = isMidiMode
-            ? "MIDI | Play Chords | Drag X: Pan | Wheel: Level"
-            : "Drag: Pan / Pitch | Wheel: Level | Dbl-Click: On/Off";
+        juce::String hintText;
+        if (learningTarget >= 0 && learningTarget < dsp::kNumSnapshots)
+        {
+            g.setColour(Theme::warnAccent);
+            g.setFont(Theme::makeFont(10.0f, true));
+            hintText = "MIDI LEARN: Send PC, CC, or Note for Snap " + juce::String(kSnapLetters[static_cast<size_t>(learningTarget)]);
+        }
+        else if (learningTarget == static_cast<int>(dsp::LiveMidiTarget::Bypass))
+        {
+            g.setColour(Theme::warnAccent);
+            g.setFont(Theme::makeFont(10.0f, true));
+            hintText = "MIDI LEARN: Send PC, CC, or Note for Bypass";
+        }
+        else
+        {
+            g.setColour(isMidiMode ? Theme::getVoiceColour(0).withAlpha(0.85f) : Theme::textMuted);
+            g.setFont(Theme::makeFont(10.0f, isMidiMode));
+            hintText = isMidiMode
+                ? "MIDI | Play Chords | Drag X: Pan | Wheel: Level"
+                : "Drag: Pan / Pitch | Wheel: Level | Dbl-Click: On/Off";
+        }
+
         g.drawFittedText(hintText,
                          hintRect.toNearestInt(),
                          juce::Justification::centred, 1);
@@ -388,7 +473,8 @@ void HarmonyStage::paint(juce::Graphics& g)
             const auto pt = voiceToPoint(v);
             const float r = voiceRadius(v);
             const auto col = Theme::getVoiceColour(v);
-            const float alpha = (isEnabled && !isMuted) ? 1.0f : 0.32f;
+            const float bypassScale = latestSnap.bypassed ? 0.42f : 1.0f;
+            const float alpha = ((isEnabled && !isMuted) ? 1.0f : 0.32f) * bypassScale;
 
             // Subtle tether to Lead center
             g.setColour(col.withAlpha(isSelected ? 0.30f * alpha : 0.14f * alpha));
@@ -396,7 +482,7 @@ void HarmonyStage::paint(juce::Graphics& g)
 
             // Live RMS outer halo
             const float vRms = std::clamp(latestSnap.voiceRms[static_cast<size_t>(v)] * 4.5f, 0.0f, 1.0f);
-            if (isEnabled && !isMuted && vRms > 0.02f)
+            if (!latestSnap.bypassed && isEnabled && !isMuted && vRms > 0.02f)
             {
                 const float halo = r + 3.0f + vRms * 12.0f;
                 g.setColour(col.withAlpha(0.22f * vRms));
@@ -406,25 +492,25 @@ void HarmonyStage::paint(juce::Graphics& g)
             // Orb body
             if (isEnabled && !isMuted)
             {
-                g.setColour(col.withAlpha(0.86f));
+                g.setColour(col.withAlpha(0.86f * bypassScale));
                 g.fillEllipse(pt.x - r, pt.y - r, r * 2.0f, r * 2.0f);
             }
             else
             {
                 g.setColour(Theme::bgElevated.withAlpha(0.85f));
                 g.fillEllipse(pt.x - r, pt.y - r, r * 2.0f, r * 2.0f);
-                g.setColour(col.withAlpha(0.45f));
+                g.setColour(col.withAlpha(0.45f * bypassScale));
                 g.drawEllipse(pt.x - r, pt.y - r, r * 2.0f, r * 2.0f, 1.5f);
             }
 
             if (isSelected)
             {
-                g.setColour(Theme::textPrimary);
+                g.setColour(Theme::textPrimary.withAlpha(bypassScale));
                 g.drawEllipse(pt.x - r - 2.0f, pt.y - r - 2.0f, (r + 2.0f) * 2.0f, (r + 2.0f) * 2.0f, 2.0f);
             }
 
             // Orb label
-            g.setColour((isEnabled && !isMuted) ? Theme::bgCanvas : Theme::textSecondary);
+            g.setColour(((isEnabled && !isMuted) ? Theme::bgCanvas : Theme::textSecondary).withAlpha(bypassScale));
             g.setFont(Theme::makeFont(10.5f, true));
             g.drawFittedText("V" + juce::String(v + 1),
                              juce::Rectangle<int>(static_cast<int>(pt.x - r), static_cast<int>(pt.y - 8), static_cast<int>(r * 2.0f), 16),
@@ -433,12 +519,24 @@ void HarmonyStage::paint(juce::Graphics& g)
             const juce::String ivLabel = isMidiMode
                 ? (midiActive ? formatMidiNote(latestSnap.voiceMidiNote[static_cast<size_t>(v)]) : juce::String("--"))
                 : juce::String(dsp::ScaleHarmonizer::formatIntervalLabel(interval, scaleType));
-            g.setColour(isEnabled ? Theme::textPrimary : Theme::textMuted);
+            g.setColour((isEnabled ? Theme::textPrimary : Theme::textMuted).withAlpha(bypassScale));
             g.setFont(Theme::makeFont(10.0f, isSelected));
             g.drawFittedText(ivLabel,
                              juce::Rectangle<int>(static_cast<int>(pt.x - 28), static_cast<int>(pt.y + r + 2.0f), 56, 13),
                              juce::Justification::centred, 1);
         }
+    }
+
+    if (latestSnap.bypassed)
+    {
+        const auto badge = juce::Rectangle<float>(area.getRight() - 78.0f, area.getBottom() - 24.0f, 70.0f, 18.0f);
+        g.setColour(Theme::bgCanvas.withAlpha(0.90f));
+        g.fillRoundedRectangle(badge, 4.5f);
+        g.setColour(Theme::muteAccent.withAlpha(0.85f));
+        g.drawRoundedRectangle(badge.reduced(0.5f), 4.5f, 1.0f);
+        g.setColour(Theme::muteAccent);
+        g.setFont(Theme::makeFont(9.5f, true));
+        g.drawFittedText("BYPASSED", badge.toNearestInt(), juce::Justification::centred, 1);
     }
 }
 
@@ -446,6 +544,7 @@ void HarmonyStage::beginDragVoice(int voiceIndex)
 {
     if (gestureActive)
         return;
+    processor.getUndoManager().beginNewTransaction("Edit Voice");
     draggingVoice = voiceIndex;
     if (auto* pPan = processor.getApvts().getParameter(params::voiceParamId(voiceIndex, params::vPan)))
         pPan->beginChangeGesture();
@@ -478,12 +577,27 @@ void HarmonyStage::mouseDown(const juce::MouseEvent& e)
                 onVoiceSelected(v);
             if (e.mods.isRightButtonDown())
             {
+                processor.getUndoManager().beginNewTransaction("Edit Voice");
                 const bool cur = getParamPlain(params::voiceParamId(v, params::vEnabled), 0.0f) >= 0.5f;
                 setParamPlain(params::voiceParamId(v, params::vEnabled), cur ? 0.0f : 1.0f, true);
             }
             repaint();
             return;
         }
+    }
+
+    if (undoBtnRect.contains(e.position))
+    {
+        processor.getUndoManager().undo();
+        repaint();
+        return;
+    }
+
+    if (redoBtnRect.contains(e.position))
+    {
+        processor.getUndoManager().redo();
+        repaint();
+        return;
     }
 
     // Check top snapshot pills (A / B / C / D)
@@ -493,6 +607,8 @@ void HarmonyStage::mouseDown(const juce::MouseEvent& e)
         {
             if (e.mods.isRightButtonDown())
                 showSnapshotContextMenu(s);
+            else if (processor.getLiveMidiController().getLearningTarget() == s)
+                processor.getLiveMidiController().cancelLearn();
             else if (e.mods.isShiftDown())
                 processor.getSnapshotManager().storeSnapshot(s);
             else
@@ -512,6 +628,7 @@ void HarmonyStage::mouseDown(const juce::MouseEvent& e)
 
         if (e.mods.isRightButtonDown())
         {
+            processor.getUndoManager().beginNewTransaction("Edit Voice");
             const bool cur = getParamPlain(params::voiceParamId(hit, params::vEnabled), 0.0f) >= 0.5f;
             setParamPlain(params::voiceParamId(hit, params::vEnabled), cur ? 0.0f : 1.0f, true);
             repaint();
@@ -550,12 +667,16 @@ void HarmonyStage::mouseDoubleClick(const juce::MouseEvent& e)
     {
         if (pillRects[static_cast<size_t>(v)].contains(e.position))
         {
+            processor.getUndoManager().beginNewTransaction("Edit Voice");
             const bool cur = getParamPlain(params::voiceParamId(v, params::vEnabled), 0.0f) >= 0.5f;
             setParamPlain(params::voiceParamId(v, params::vEnabled), cur ? 0.0f : 1.0f, true);
             repaint();
             return;
         }
     }
+
+    if (undoBtnRect.contains(e.position) || redoBtnRect.contains(e.position))
+        return;
 
     for (int s = 0; s < dsp::kNumSnapshots; ++s)
     {
@@ -566,6 +687,7 @@ void HarmonyStage::mouseDoubleClick(const juce::MouseEvent& e)
     const int hit = hitTestOrb(e.position);
     if (hit >= 0)
     {
+        processor.getUndoManager().beginNewTransaction("Edit Voice");
         const bool cur = getParamPlain(params::voiceParamId(hit, params::vEnabled), 0.0f) >= 0.5f;
         setParamPlain(params::voiceParamId(hit, params::vEnabled), cur ? 0.0f : 1.0f, true);
         repaint();
@@ -578,6 +700,7 @@ void HarmonyStage::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWh
     if (target < 0)
         target = selectedVoice;
 
+    processor.getUndoManager().beginNewTransaction("Edit Voice Level");
     const auto id = params::voiceParamId(target, params::vGainDb);
     const float curDb = getParamPlain(id, -6.0f);
     const float delta = (wheel.deltaY >= 0.0f ? 1.5f : -1.5f) * (wheel.isReversed ? -1.0f : 1.0f);

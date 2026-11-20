@@ -56,6 +56,8 @@ private:
 
     std::array<juce::Rectangle<float>, dsp::kExposedVoicesV1> pillRects{};
     std::array<juce::Rectangle<float>, dsp::kNumSnapshots> snapPillRects{};
+    juce::Rectangle<float> undoBtnRect{};
+    juce::Rectangle<float> redoBtnRect{};
     juce::Rectangle<float> snapLabelRect{};
     juce::Rectangle<float> hintRect{};
 };

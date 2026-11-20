@@ -108,6 +108,7 @@ private:
     float smoothedCorrectionSt = 0.0f;
     float smoothedTuneBlend = 0.0f;
     float smoothedBusTrim = 1.0f;
+    float smoothedBypassWet = 1.0f;
     float paramSmoothAlpha = 0.01f;
     bool firstBlockAfterReset = true;
     bool prepared = false;
@@ -125,6 +126,7 @@ private:
         std::atomic<float> detectedMidi{ 60.0f };
         std::atomic<float> voicedClarity{ 0.0f };
         std::atomic<bool> isVoiced{ false };
+        std::atomic<bool> bypassed{ false };
         std::atomic<int> activeLatencySamples{ 256 };
         std::atomic<int> activeMode{ 0 };
         std::atomic<int> activeHarmonyMode{ 0 };

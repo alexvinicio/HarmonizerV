@@ -1,6 +1,7 @@
 #include "Plugin/PresetManager.h"
 #include "Plugin/ParameterIds.h"
 #include "Plugin/SnapshotManager.h"
+#include "Plugin/LiveMidiController.h"
 
 namespace harmonizer
 {
@@ -100,9 +101,12 @@ constexpr std::array<FactoryPresetSpec, 7> kFactoryPresets = {{
 }};
 } // namespace
 
-PresetManager::PresetManager(juce::AudioProcessorValueTreeState& state, SnapshotManager& snapshots)
+PresetManager::PresetManager(juce::AudioProcessorValueTreeState& state,
+                             SnapshotManager& snapshots,
+                             LiveMidiController& liveMidi)
     : apvts(state),
-      snapshotManager(snapshots)
+      snapshotManager(snapshots),
+      liveMidiController(liveMidi)
 {
     numFactoryPresets = static_cast<int>(kFactoryPresets.size());
     refreshPresets();
@@ -146,6 +150,9 @@ void PresetManager::setParamValue(const juce::String& id, float plainValue)
 
 void PresetManager::applyFactoryPreset(int index)
 {
+    if (auto* um = apvts.undoManager)
+        um->beginNewTransaction("Load Preset");
+
     const auto& spec = kFactoryPresets[static_cast<size_t>(std::clamp(index, 0, numFactoryPresets - 1))];
 
     setParamValue(params::mix, spec.mixPct);
@@ -199,9 +206,14 @@ void PresetManager::loadPreset(int index)
                 if (snapshotsNode.isValid())
                     tree.removeChild(snapshotsNode, nullptr);
 
+                auto midiMapNode = tree.getChildWithName("MIDIMAP");
+                if (midiMapNode.isValid())
+                    tree.removeChild(midiMapNode, nullptr);
+
                 snapshotManager.beginExternalStateLoad();
                 apvts.replaceState(tree);
                 snapshotManager.loadFromStateTree(snapshotsNode);
+                liveMidiController.loadFromStateTree(midiMapNode);
                 snapshotManager.endExternalStateLoad();
             }
         }
@@ -217,6 +229,7 @@ bool PresetManager::saveUserPreset(const juce::String& name)
     const auto file = getUserPresetDirectory().getChildFile(sanitized + ".xml");
     auto stateCopy = apvts.copyState();
     snapshotManager.writeToStateTree(stateCopy);
+    liveMidiController.writeToStateTree(stateCopy);
     std::unique_ptr<juce::XmlElement> xml(stateCopy.createXml());
     if (xml == nullptr || !xml->writeTo(file))
         return false;

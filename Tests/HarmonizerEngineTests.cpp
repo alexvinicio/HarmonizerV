@@ -741,3 +741,73 @@ TEST_CASE("HarmonizerEngine hot switches across all LIVE buffer sizes with exact
         REQUIRE(peakIdx == expectedLatencies[i]);
     }
 }
+
+TEST_CASE("HarmonizerEngine click-free Bypass passes exact latency-aligned dry audio", "[HarmonizerEngine][Bypass]")
+{
+    const double sr = 48000.0;
+    const int bs = 128;
+
+    HarmonizerEngine engine;
+    engine.prepare(sr, bs, LiveBufferSize::Fast256);
+    const int lat = engine.getActiveLatencySamples();
+    REQUIRE(lat == 256);
+
+    GlobalParams gp;
+    gp.engineMode = EngineMode::Live;
+    gp.mix = 1.0f;            // 100% wet when active
+    gp.outputGainDb = 6.0f;   // Boosted wet output to verify Bypass ignores wet/output gain
+    gp.bypass = true;
+    const auto vp = makeFourActiveVoices();
+
+    const int totalSamples = 4096;
+    std::vector<float> in(static_cast<size_t>(totalSamples), 0.0f);
+    std::vector<float> outL(static_cast<size_t>(totalSamples), 0.0f);
+    std::vector<float> outR(static_cast<size_t>(totalSamples), 0.0f);
+    for (int i = 0; i < totalSamples; ++i)
+    {
+        const double t = static_cast<double>(i) / sr;
+        in[static_cast<size_t>(i)] = 0.25f * static_cast<float>(std::sin(kTwoPi * 220.0 * t));
+    }
+
+    for (int off = 0; off < totalSamples; off += bs)
+    {
+        const float* inPtr[1] = { in.data() + off };
+        float* outPtr[2] = { outL.data() + off, outR.data() + off };
+        engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+    }
+
+    for (int i = lat + 64; i < totalSamples; ++i)
+    {
+        REQUIRE(outL[static_cast<size_t>(i)] == Catch::Approx(in[static_cast<size_t>(i - lat)]).margin(1.0e-5f));
+        REQUIRE(outR[static_cast<size_t>(i)] == Catch::Approx(in[static_cast<size_t>(i - lat)]).margin(1.0e-5f));
+    }
+    REQUIRE(engine.getTelemetry().bypassed);
+
+    // Toggle Bypass off -> on smoothly without clicks or NaNs
+    float prevL = outL.back();
+    float maxDelta = 0.0f;
+    std::vector<float> blkIn(bs, 0.0f), blkOutL(bs, 0.0f), blkOutR(bs, 0.0f);
+
+    for (int blk = 0; blk < 40; ++blk)
+    {
+        gp.bypass = (blk >= 20);
+        for (int i = 0; i < bs; ++i)
+        {
+            const double t = static_cast<double>(totalSamples + blk * bs + i) / sr;
+            blkIn[static_cast<size_t>(i)] = 0.25f * static_cast<float>(std::sin(kTwoPi * 220.0 * t));
+        }
+        const float* inPtr[1] = { blkIn.data() };
+        float* outPtr[2] = { blkOutL.data(), blkOutR.data() };
+        engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+
+        for (int i = 0; i < bs; ++i)
+        {
+            REQUIRE(std::isfinite(blkOutL[static_cast<size_t>(i)]));
+            REQUIRE(std::isfinite(blkOutR[static_cast<size_t>(i)]));
+            maxDelta = std::max(maxDelta, std::abs(blkOutL[static_cast<size_t>(i)] - prevL));
+            prevL = blkOutL[static_cast<size_t>(i)];
+        }
+    }
+
+    REQUIRE(maxDelta < 0.45f);
+}

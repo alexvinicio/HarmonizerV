@@ -51,6 +51,30 @@ private:
     int currentMode = 0; // 0 = Auto, 1 = MIDI
 };
 
+class PowerBypassButton final : public juce::Component,
+                                public juce::SettableTooltipClient
+{
+public:
+    PowerBypassButton(juce::AudioProcessorValueTreeState& apvts, LiveMidiController& liveMidi);
+
+    void setActiveColour(juce::Colour c);
+    void paint(juce::Graphics& g) override;
+    void mouseEnter(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
+    void mouseDown(const juce::MouseEvent& e) override;
+
+private:
+    void handleBypassChanged(float newValue);
+    void openContextMenu();
+
+    LiveMidiController& liveMidiController;
+    juce::UndoManager* undoManager = nullptr;
+    std::unique_ptr<juce::ParameterAttachment> attachment;
+    juce::Colour activeColour{ Theme::liveAccent };
+    bool bypassed = false;
+    bool hovered = false;
+};
+
 class HeaderBar final : public juce::Component
 {
 public:
@@ -67,6 +91,8 @@ private:
     static juce::String midiToNoteName(float midiNote);
 
     HarmonizerVProcessor& processor;
+
+    PowerBypassButton powerBypassBtn;
 
     juce::TextButton prevPresetBtn{ "<" };
     juce::ComboBox presetCombo;

@@ -176,6 +176,12 @@ void SnapshotManager::applySwitchInternal(int targetIndex, bool notifySnapshotPa
         syncUiAtomicsLocked();
     }
 
+    if (shouldApply || notifySnapshotParam)
+    {
+        if (auto* um = apvts.undoManager)
+            um->beginNewTransaction("Snapshot");
+    }
+
     if (shouldApply)
         applySceneValuesToApvts(toApply);
 
@@ -202,6 +208,8 @@ void SnapshotManager::storeSnapshot(int index)
         syncUiAtomicsLocked();
     }
     activeSlotDirty.store(false, std::memory_order_release);
+    if (auto* um = apvts.undoManager)
+        um->beginNewTransaction("Snapshot");
     setSnapshotParamNotifyingHost(storedIdx);
 }
 
@@ -216,6 +224,8 @@ void SnapshotManager::copySnapshot(int srcIndex, int dstIndex)
     }
     if (applyNow)
     {
+        if (auto* um = apvts.undoManager)
+            um->beginNewTransaction("Snapshot");
         applySceneValuesToApvts(toApply);
         activeSlotDirty.store(false, std::memory_order_release);
     }
