@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 if(APPLE AND NOT DEFINED CMAKE_OSX_ARCHITECTURES)
-    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS universal architectures")
+    set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "macOS Apple Silicon architecture")
 endif()
 if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")

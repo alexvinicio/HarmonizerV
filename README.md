@@ -20,8 +20,8 @@ Armonizador vocal profesional de código abierto en **C++20 + JUCE 8** con doble
   - **Snapshots `A / B / C / D`** (clic izquierdo cambia, Shift+clic guarda, clic derecho menú completo), **`MIDI Learn`** por Snapshot y **Global Bypass** sin clics, **`Undo / Redo`** y 9 presets de fábrica más presets de usuario.
 - **Multiidioma (`EN | ES`):**
   - Detección automática del idioma del sistema operativo al primer inicio y cambio inmediato en vivo guardado entre sesiones.
-- **Windows Standalone con ASIO (`JUCE_ASIO=1`) + macOS Universal (`arm64` + `x86_64`):**
-  - Formatos soportados: `VST3` y `Standalone` en Windows; `VST3`, `AU` y `Standalone` en macOS.
+- **Windows Standalone con ASIO (`JUCE_ASIO=1`) + macOS Apple Silicon (`M1+ / arm64`):**
+  - Formatos soportados: `VST3` y `Standalone` en Windows; `VST3`, `AU` y `Standalone` en macOS (Apple Silicon M1 o superior).
 
 ---
 
@@ -37,8 +37,8 @@ Armonizador vocal profesional de código abierto en **C++20 + JUCE 8** con doble
    Por defecto instala para tu usuario en `%LOCALAPPDATA%\Programs\Common\VST3\HarmonizerV.vst3`. Si quieres instalación global (requiere PowerShell como Administrador), usa `-Scope System`.
 4. Para usar sin DAW con baja latencia ASIO, abre **`HarmonizerV.exe`** directamente.
 
-### macOS Universal (`Apple Silicon arm64 + Intel x86_64`)
-1. Descarga el artefacto `HarmonizerV-macOS-Universal` desde GitHub Actions o Releases.
+### macOS Apple Silicon (`M1 o superior / arm64`)
+1. Descarga el artefacto `HarmonizerV-macOS-arm64` desde GitHub Actions o Releases.
 2. Copia:
    - `HarmonizerV.vst3` a `~/Library/Audio/Plug-Ins/VST3/` (o `/Library/Audio/Plug-Ins/VST3/`)
    - `HarmonizerV.component` a `~/Library/Audio/Plug-Ins/Components/` (o `/Library/Audio/Plug-Ins/Components/`)
@@ -61,10 +61,10 @@ cmake --build build --config Release --target HarmonizerV_Tests HarmonizerV_VST3
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-En macOS Universal (`VST3` + `AU` + `Standalone`):
+En macOS Apple Silicon M1+ (`VST3` + `AU` + `Standalone`):
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DHARMONIZERV_BUILD_TESTS=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64" -DHARMONIZERV_BUILD_TESTS=ON
 cmake --build build --config Release --parallel
 ctest --test-dir build -C Release --output-on-failure
 ```

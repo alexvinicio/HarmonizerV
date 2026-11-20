@@ -20,8 +20,8 @@ jobs:
             vst3_path: build/HarmonizerV_artefacts/Release/VST3/HarmonizerV.vst3
             standalone_path: build/HarmonizerV_artefacts/Release/Standalone/HarmonizerV.exe
           - os: macos-15
-            name: macOS-Universal
-            generator_args: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+            name: macOS-arm64
+            generator_args: -DCMAKE_OSX_ARCHITECTURES="arm64"
             vst3_path: build/HarmonizerV_artefacts/Release/VST3/HarmonizerV.vst3
             au_path: build/HarmonizerV_artefacts/Release/AU/HarmonizerV.component
             standalone_path: build/HarmonizerV_artefacts/Release/Standalone/HarmonizerV.app
