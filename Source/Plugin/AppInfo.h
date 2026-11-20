@@ -12,9 +12,8 @@ inline constexpr const char* kVersionString = JucePlugin_VersionString;
 inline constexpr const char* kVersionString = "2.6.0";
 #endif
 
-// TODO before packaging release: replace placeholder URL/text with final buymeacoffee.com/<handle> and contact info.
-inline constexpr const char* kBuyMeACoffeeUrl = "https://buymeacoffee.com/";
-inline constexpr const char* kBuyMeACoffeeText = "buymeacoffee.com";
-inline constexpr bool kSupportLinkFinalized = false;
+inline constexpr const char* kBuyMeACoffeeUrl = "https://buymeacoffee.com/alexvinicio";
+inline constexpr const char* kBuyMeACoffeeText = "buymeacoffee.com/alexvinicio";
+inline constexpr bool kSupportLinkFinalized = true;
 
 } // namespace harmonizer::appinfo
