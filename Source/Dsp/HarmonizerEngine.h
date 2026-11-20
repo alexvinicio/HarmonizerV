@@ -132,6 +132,7 @@ private:
         std::atomic<int> activeMode{ 0 };
         std::atomic<int> activeHarmonyMode{ 0 };
         std::atomic<float> inputTuneCorrectionCents{ 0.0f };
+        std::atomic<float> deEssReductionDb{ 0.0f };
         std::array<std::atomic<float>, kMaxVoices> voiceRms{};
         std::array<std::atomic<float>, kMaxVoices> voiceTargetSemitones{};
         std::array<std::atomic<int>, kMaxVoices> voiceMidiNote{};

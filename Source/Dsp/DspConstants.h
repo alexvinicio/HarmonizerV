@@ -91,6 +91,7 @@ struct TelemetrySnapshot
     EngineMode activeMode = EngineMode::Live;
     HarmonyMode activeHarmonyMode = HarmonyMode::Auto;
     float inputTuneCorrectionCents = 0.0f;
+    float deEssReductionDb = 0.0f;
     std::array<float, kMaxVoices> voiceRms{};
     std::array<float, kMaxVoices> voiceTargetSemitones{};
     std::array<int, kMaxVoices> voiceMidiNote{};

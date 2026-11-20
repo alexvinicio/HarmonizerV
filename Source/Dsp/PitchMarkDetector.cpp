@@ -39,7 +39,7 @@ void PitchMarkDetector::prepare(double sampleRate)
 
 void PitchMarkDetector::updateAdaptiveLpf(double cutoffHz) noexcept
 {
-    const double fc = std::clamp(cutoffHz, 120.0, std::min(1250.0, fs * 0.40));
+    const double fc = std::clamp(cutoffHz, 90.0, std::min(1250.0, fs * 0.40));
     const double k = std::tan(kPi * fc / fs);
     const double norm = 1.0 / (1.0 + std::sqrt(2.0) * k + k * k);
     lpB0 = k * k * norm;
@@ -109,7 +109,7 @@ void PitchMarkDetector::pushSample(float sample, float currentF0Hz, bool isVoice
     const double t0 = fs / static_cast<double>(clampedF0);
 
     // Track cutoff gently around 1.45 * F0 to strip vowel formants cleanly
-    const double targetCut = std::clamp(static_cast<double>(clampedF0) * 1.45, 140.0, 1200.0);
+    const double targetCut = std::clamp(static_cast<double>(clampedF0) * 1.45, 95.0, 1200.0);
     smoothedCutoffHz += (targetCut - smoothedCutoffHz) * 0.002;
     if (std::abs(smoothedCutoffHz - lastCoefCutoffHz) > lastCoefCutoffHz * 0.03)
         updateAdaptiveLpf(smoothedCutoffHz);

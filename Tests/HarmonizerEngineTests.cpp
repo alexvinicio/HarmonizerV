@@ -1032,3 +1032,102 @@ TEST_CASE("VoiceChannelStrip vibrato produces organic pitch modulation and Voici
         REQUIRE(note <= 72);
     }
 }
+
+TEST_CASE("HarmonizerEngine telemetry reports De-Ess gain reduction, TUNE cents, and zeros both in bypass", "[HarmonizerEngine][Telemetry]")
+{
+    const double sr = 48000.0;
+
+    // 1) Direct HarmonyDeEsser gain reduction telemetry
+    {
+        HarmonyDeEsser ds;
+        ds.prepare(sr);
+        const int n = 4800;
+        std::vector<float> bufL(static_cast<size_t>(n), 0.0f), bufR(static_cast<size_t>(n), 0.0f);
+
+        auto fillTone = [&](double freqHz)
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                const float s = 0.35f * static_cast<float>(std::sin(kTwoPi * freqHz * (static_cast<double>(i) / sr)));
+                bufL[static_cast<size_t>(i)] = s;
+                bufR[static_cast<size_t>(i)] = s;
+            }
+        };
+
+        fillTone(7000.0);
+        ds.process(bufL.data(), bufR.data(), n, 1.0f);
+        REQUIRE(ds.getLastReductionDb() >= 3.5f);
+
+        ds.reset();
+        fillTone(300.0);
+        ds.process(bufL.data(), bufR.data(), n, 1.0f);
+        REQUIRE(ds.getLastReductionDb() < 0.5f);
+
+        fillTone(7000.0);
+        ds.process(bufL.data(), bufR.data(), n, 0.0f);
+        REQUIRE(ds.getLastReductionDb() == 0.0f);
+    }
+
+    // 2) Full engine telemetry for TUNE cents, De-Ess GR, and clean zeroing in bypass
+    {
+        const int bs = 128;
+        HarmonizerEngine engine;
+        engine.prepare(sr, bs);
+
+        GlobalParams gp;
+        gp.key = 0; // C Major
+        gp.scaleIndex = 0;
+        gp.engineMode = EngineMode::Live;
+        gp.mix = 0.5f;
+        gp.inputTuneAmount = 1.0f;
+        gp.deEssAmount = 1.0f;
+        gp.spaceAmount = 0.0f;
+
+        std::array<VoiceParams, kMaxVoices> vp{};
+        vp[0] = { true, false, false, false, 60, 0, 0.0f, 0.0f, 0.0f, 60.0f, 18000.0f, 0.0f, 0.0f, 0.0f };
+
+        std::vector<float> in(bs, 0.0f), outL(bs, 0.0f), outR(bs, 0.0f);
+        const double flatA3Hz = 220.0 * std::pow(2.0, -35.0 / 1200.0);
+
+        for (int blk = 0; blk < 90; ++blk)
+        {
+            for (int i = 0; i < bs; ++i)
+            {
+                const double t = static_cast<double>(blk * bs + i) / sr;
+                in[static_cast<size_t>(i)] = static_cast<float>(0.30 * std::sin(kTwoPi * flatA3Hz * t));
+            }
+            const float* inPtr[1] = { in.data() };
+            float* outPtr[2] = { outL.data(), outR.data() };
+            engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+        }
+        REQUIRE(engine.getTelemetry().inputTuneCorrectionCents > 15.0f);
+
+        // Drive bright 7 kHz sibilant input with 100% wet Unison harmony to trigger De-Esser GR
+        gp.mix = 1.0f;
+        gp.naturalness = 0.0f; // Allow full HF through Unison grain body
+        for (int blk = 0; blk < 60; ++blk)
+        {
+            for (int i = 0; i < bs; ++i)
+            {
+                const double t = static_cast<double>(blk * bs + i) / sr;
+                in[static_cast<size_t>(i)] = static_cast<float>(0.35 * std::sin(kTwoPi * 7000.0 * t));
+            }
+            const float* inPtr[1] = { in.data() };
+            float* outPtr[2] = { outL.data(), outR.data() };
+            engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+        }
+        REQUIRE(engine.getTelemetry().deEssReductionDb > 1.0f);
+
+        // Engage bypass -> both meters must drop cleanly to 0.0f
+        gp.bypass = true;
+        for (int blk = 0; blk < 4; ++blk)
+        {
+            const float* inPtr[1] = { in.data() };
+            float* outPtr[2] = { outL.data(), outR.data() };
+            engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+        }
+        const auto bypassSnap = engine.getTelemetry();
+        REQUIRE(bypassSnap.deEssReductionDb == 0.0f);
+        REQUIRE(bypassSnap.inputTuneCorrectionCents == 0.0f);
+    }
+}

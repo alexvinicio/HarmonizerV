@@ -15,6 +15,7 @@ public:
     void reset() noexcept;
 
     void process(float* wetL, float* wetR, int numSamples, float deEssAmount) noexcept;
+    float getLastReductionDb() const noexcept { return lastReductionDb; }
 
 private:
     struct SvfBand
@@ -62,6 +63,7 @@ private:
     float releaseAlpha = 0.005f;
     float broadAlpha = 0.01f;
     float smoothedGain = 1.0f;
+    float lastReductionDb = 0.0f;
 };
 
 class VocalSpace
@@ -127,6 +129,7 @@ public:
     void reset() noexcept;
 
     void process(float* wetL, float* wetR, int numSamples, float deEssAmount, float spaceAmount) noexcept;
+    float getDeEssReductionDb() const noexcept { return deEsser.getLastReductionDb(); }
 
 private:
     HarmonyDeEsser deEsser;

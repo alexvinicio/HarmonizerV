@@ -116,6 +116,10 @@ private:
     dsp::TelemetrySnapshot latestSnap{};
     float meterLevelL = 0.0f;
     float meterLevelR = 0.0f;
+    float peakHoldL = 0.0f;
+    float peakHoldR = 0.0f;
+    int peakHoldTimerL = 0;
+    int peakHoldTimerR = 0;
 };
 
 } // namespace harmonizer::ui

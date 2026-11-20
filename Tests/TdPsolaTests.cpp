@@ -250,3 +250,82 @@ TEST_CASE("TdPsolaVoice supports all LiveBufferSize latency options cleanly", "[
         }
     }
 }
+
+TEST_CASE("TdPsolaVoice low vocals (< 120 Hz) in Ultra128 and Fast256 preserve pitch, formants, and continuity", "[TdPsolaVoice][LowVocal]")
+{
+    using harmonizer::dsp::LiveBufferSize;
+    const double fs = 48000.0;
+
+    // 1) Low 90 Hz voice pitch accuracy in Ultra128 and Fast256
+    {
+        const double f0 = 90.0;
+        const auto input = makeRichVocalWave(f0, fs, 32000);
+        const struct { LiveBufferSize size; int lat; } configs[] = {
+            { LiveBufferSize::Ultra128, 128 },
+            { LiveBufferSize::Fast256,  256 }
+        };
+        const float shifts[] = { +4.0f, +7.0f, -5.0f };
+
+        for (const auto& cfg : configs)
+        {
+            for (float st : shifts)
+            {
+                int lat = 0;
+                const auto out = runTdPsola(input, fs, st, 0.0f, lat, 0.35f, cfg.size);
+                REQUIRE(lat == cfg.lat);
+                for (float s : out)
+                {
+                    REQUIRE(std::isfinite(s));
+                    REQUIRE(std::abs(s) < 2.0f);
+                }
+
+                const double expectedHz = f0 * std::pow(2.0, st / 12.0);
+                const double measuredHz = findStrongestHarmonicPeakHz(out, 12000, 12000, fs, expectedHz);
+                const double errCents = 1200.0 * std::log2(measuredHz / expectedHz);
+                INFO("LowF0=90Hz Buffer=" << cfg.lat << " Shift=" << st << "st err=" << errCents << " cents");
+                REQUIRE(std::abs(errCents) <= 25.0);
+            }
+        }
+    }
+
+    // 2) Formant independence on low 95 Hz voice in Fast256
+    {
+        const auto input = makeRichVocalWave(95.0, fs, 28800);
+        int lat = 0;
+        const auto outDown = runTdPsola(input, fs, +4.0f, -6.0f, lat, 0.35f, LiveBufferSize::Fast256);
+        const auto outUp   = runTdPsola(input, fs, +4.0f, +6.0f, lat, 0.35f, LiveBufferSize::Fast256);
+
+        const double centroidDown = computeSpectralCentroidHz(outDown, 12000, 4096, fs);
+        const double centroidUp   = computeSpectralCentroidHz(outUp, 12000, 4096, fs);
+        INFO("Low95Hz Centroid(-6st)=" << centroidDown << " Hz, (+6st)=" << centroidUp << " Hz");
+        REQUIRE(centroidUp > centroidDown * 1.15);
+    }
+
+    // 3) Continuity on 85 Hz voice (-5 st) in Ultra128 (zero silent grain truncation gaps)
+    {
+        const auto input = makeRichVocalWave(85.0, fs, 28800);
+        int lat = 0;
+        const auto out = runTdPsola(input, fs, -5.0f, 0.0f, lat, 0.35f, LiveBufferSize::Ultra128);
+
+        double minWinRms = 1.0e9;
+        double sumWinRms = 0.0;
+        int numWins = 0;
+        for (int start = 12000; start + 256 <= 24000; start += 256)
+        {
+            double acc = 0.0;
+            for (int n = 0; n < 256; ++n)
+            {
+                const double v = out[static_cast<size_t>(start + n)];
+                acc += v * v;
+            }
+            const double rms = std::sqrt(acc / 256.0);
+            minWinRms = std::min(minWinRms, rms);
+            sumWinRms += rms;
+            ++numWins;
+        }
+        const double avgWinRms = sumWinRms / std::max(1, numWins);
+        INFO("Low85Hz Ultra128 minWinRms=" << minWinRms << " avgWinRms=" << avgWinRms);
+        REQUIRE(avgWinRms > 0.01);
+        REQUIRE(minWinRms > 0.25 * avgWinRms);
+    }
+}

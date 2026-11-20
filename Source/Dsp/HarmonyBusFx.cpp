@@ -31,16 +31,22 @@ void HarmonyDeEsser::reset() noexcept
     envSib = 0.0f;
     envBroad = 0.0f;
     smoothedGain = 1.0f;
+    lastReductionDb = 0.0f;
 }
 
 void HarmonyDeEsser::process(float* wetL, float* wetR, int numSamples, float deEssAmount) noexcept
 {
     const float amount = std::clamp(deEssAmount, 0.0f, 1.0f);
     if (amount <= 0.001f || numSamples <= 0)
+    {
+        smoothedGain = 1.0f;
+        lastReductionDb = 0.0f;
         return;
+    }
 
     // Max high-band attenuation up to -12 dB at amount = 1.0
     const float minGain = dbToGain(-12.0f * amount);
+    float minBlockGain = 1.0f;
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -64,6 +70,7 @@ void HarmonyDeEsser::process(float* wetL, float* wetR, int numSamples, float deE
 
         const float gainAlpha = (targetGain < smoothedGain) ? attackAlpha : releaseAlpha;
         smoothedGain += gainAlpha * (targetGain - smoothedGain);
+        minBlockGain = std::min(minBlockGain, smoothedGain);
 
         // Complementary 1-pole high-shelf split: lp + hp == x exactly, zero notch/phase artifact
         splitLpL += splitAlpha * (xL - splitLpL);
@@ -74,6 +81,8 @@ void HarmonyDeEsser::process(float* wetL, float* wetR, int numSamples, float deE
         wetL[i] = sanitizeSample(static_cast<float>(splitLpL + hpL * static_cast<double>(smoothedGain)));
         wetR[i] = sanitizeSample(static_cast<float>(splitLpR + hpR * static_cast<double>(smoothedGain)));
     }
+
+    lastReductionDb = std::clamp(-gainToDb(minBlockGain), 0.0f, 12.0f);
 }
 
 // ============================================================================

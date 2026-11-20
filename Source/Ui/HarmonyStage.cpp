@@ -325,14 +325,15 @@ void HarmonyStage::paint(juce::Graphics& g)
     {
         const auto pr = pillRects[static_cast<size_t>(v)];
         const bool isSelected = (v == selectedVoice);
+        const bool isHovered = (!isSelected && hoverZone == HoverZone::VoicePill && hoverIndex == v);
         const bool midiActive = latestSnap.voiceMidiActive[static_cast<size_t>(v)];
         const bool isEnabled = isMidiMode ? midiActive : (getParamPlain(params::voiceParamId(v, params::vEnabled), 0.0f) >= 0.5f);
         const bool isMuted = getParamPlain(params::voiceParamId(v, params::vMute), 0.0f) >= 0.5f;
         const auto col = Theme::getVoiceColour(v);
 
-        g.setColour(isSelected ? Theme::bgElevated : Theme::bgCanvas.withAlpha(0.75f));
+        g.setColour(isSelected ? Theme::bgElevated : (isHovered ? Theme::bgElevated.withAlpha(0.70f) : Theme::bgCanvas.withAlpha(0.75f)));
         g.fillRoundedRectangle(pr, 6.0f);
-        g.setColour(isSelected ? col : Theme::borderSubtle);
+        g.setColour(isSelected ? col : (isHovered ? col.withAlpha(0.55f) : Theme::borderSubtle));
         g.drawRoundedRectangle(pr.reduced(0.5f), 6.0f, isSelected ? 1.5f : 1.0f);
 
         const float dotSize = (visibleVoices > 4) ? 6.0f : 8.0f;
@@ -358,9 +359,10 @@ void HarmonyStage::paint(juce::Graphics& g)
 
     // 4V | 8V segmented bank pill
     {
+        const bool bankHovered = (hoverZone == HoverZone::BankToggle);
         g.setColour(Theme::bgCanvas.withAlpha(0.75f));
         g.fillRoundedRectangle(bankToggleRect, 6.0f);
-        g.setColour(Theme::borderSubtle);
+        g.setColour(bankHovered ? Theme::borderFocus.brighter(0.25f) : Theme::borderSubtle);
         g.drawRoundedRectangle(bankToggleRect.reduced(0.5f), 6.0f, 1.0f);
 
         const float hw = bankToggleRect.getWidth() * 0.5f;
@@ -384,9 +386,10 @@ void HarmonyStage::paint(juce::Graphics& g)
 
     // VOICING selector pill
     {
-        g.setColour(Theme::bgElevated);
+        const bool voicingHovered = (hoverZone == HoverZone::VoicingBtn);
+        g.setColour(voicingHovered ? Theme::bgElevated.brighter(0.10f) : Theme::bgElevated);
         g.fillRoundedRectangle(voicingBtnRect, 6.0f);
-        g.setColour(Theme::borderFocus);
+        g.setColour(voicingHovered ? modeAccent.withAlpha(0.70f) : Theme::borderFocus);
         g.drawRoundedRectangle(voicingBtnRect.reduced(0.5f), 6.0f, 1.0f);
 
         g.setColour(Theme::textPrimary);
@@ -404,11 +407,11 @@ void HarmonyStage::paint(juce::Graphics& g)
 
     // Undo / Redo compact vector buttons
     const auto& um = processor.getUndoManager();
-    auto drawUndoRedoBtn = [&](const juce::Rectangle<float>& rect, bool isUndo, bool enabled)
+    auto drawUndoRedoBtn = [&](const juce::Rectangle<float>& rect, bool isUndo, bool enabled, bool hovered)
     {
-        g.setColour(Theme::bgCanvas.withAlpha(0.75f));
+        g.setColour((enabled && hovered) ? Theme::bgElevated : Theme::bgCanvas.withAlpha(0.75f));
         g.fillRoundedRectangle(rect, 5.5f);
-        g.setColour(enabled ? Theme::borderFocus : Theme::borderSubtle.withAlpha(0.6f));
+        g.setColour(enabled ? (hovered ? modeAccent.withAlpha(0.65f) : Theme::borderFocus) : Theme::borderSubtle.withAlpha(0.6f));
         g.drawRoundedRectangle(rect.reduced(0.5f), 5.5f, 1.0f);
 
         const auto c = rect.getCentre();
@@ -432,8 +435,8 @@ void HarmonyStage::paint(juce::Graphics& g)
         g.strokePath(p, juce::PathStrokeType(1.45f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     };
 
-    drawUndoRedoBtn(undoBtnRect, true,  um.canUndo());
-    drawUndoRedoBtn(redoBtnRect, false, um.canRedo());
+    drawUndoRedoBtn(undoBtnRect, true,  um.canUndo(), hoverZone == HoverZone::UndoBtn);
+    drawUndoRedoBtn(redoBtnRect, false, um.canRedo(), hoverZone == HoverZone::RedoBtn);
 
     // Snapshot Scene Pills (A / B / C / D) top-right
     const auto& snapMgr = processor.getSnapshotManager();
@@ -452,6 +455,7 @@ void HarmonyStage::paint(juce::Graphics& g)
         const bool isLearning = (learningTarget == s);
         const bool isActive = (s == activeSnap);
         const bool isPopulated = snapMgr.isSnapshotPopulated(s);
+        const bool isSnapHovered = (hoverZone == HoverZone::SnapPill && hoverIndex == s);
 
         if (isLearning)
         {
@@ -470,9 +474,9 @@ void HarmonyStage::paint(juce::Graphics& g)
         }
         else if (isPopulated)
         {
-            g.setColour(Theme::bgElevated);
+            g.setColour(isSnapHovered ? Theme::bgElevated.brighter(0.10f) : Theme::bgElevated);
             g.fillRoundedRectangle(sr, 5.5f);
-            g.setColour(Theme::borderFocus);
+            g.setColour(isSnapHovered ? modeAccent.withAlpha(0.70f) : Theme::borderFocus);
             g.drawRoundedRectangle(sr.reduced(0.5f), 5.5f, 1.0f);
 
             g.setColour(modeAccent.withAlpha(0.75f));
@@ -483,9 +487,9 @@ void HarmonyStage::paint(juce::Graphics& g)
         }
         else
         {
-            g.setColour(Theme::bgCanvas.withAlpha(0.75f));
+            g.setColour(isSnapHovered ? Theme::bgElevated.withAlpha(0.70f) : Theme::bgCanvas.withAlpha(0.75f));
             g.fillRoundedRectangle(sr, 5.5f);
-            g.setColour(Theme::borderSubtle);
+            g.setColour(isSnapHovered ? modeAccent.withAlpha(0.55f) : Theme::borderSubtle);
             g.drawRoundedRectangle(sr.reduced(0.5f), 5.5f, 1.0f);
 
             g.setColour(Theme::textMuted);
@@ -629,6 +633,11 @@ void HarmonyStage::paint(juce::Graphics& g)
             {
                 g.setColour(Theme::textPrimary.withAlpha(bypassScale));
                 g.drawEllipse(pt.x - r - 2.0f, pt.y - r - 2.0f, (r + 2.0f) * 2.0f, (r + 2.0f) * 2.0f, 2.0f);
+            }
+            else if (hoverZone == HoverZone::Orb && hoverIndex == v)
+            {
+                g.setColour(col.withAlpha(0.65f * bypassScale));
+                g.drawEllipse(pt.x - r - 2.0f, pt.y - r - 2.0f, (r + 2.0f) * 2.0f, (r + 2.0f) * 2.0f, 1.5f);
             }
 
             // Orb label
@@ -810,6 +819,78 @@ void HarmonyStage::mouseDrag(const juce::MouseEvent& e)
 void HarmonyStage::mouseUp(const juce::MouseEvent&)
 {
     endDragVoice();
+}
+
+void HarmonyStage::mouseMove(const juce::MouseEvent& e)
+{
+    HoverZone nextZone = HoverZone::None;
+    int nextIndex = -1;
+    const int visibleVoices = getVisibleVoiceCount();
+
+    for (int v = 0; v < visibleVoices; ++v)
+    {
+        if (pillRects[static_cast<size_t>(v)].contains(e.position))
+        {
+            nextZone = HoverZone::VoicePill;
+            nextIndex = v;
+            break;
+        }
+    }
+
+    if (nextZone == HoverZone::None)
+    {
+        if (bankToggleRect.contains(e.position))
+            nextZone = HoverZone::BankToggle;
+        else if (voicingBtnRect.contains(e.position))
+            nextZone = HoverZone::VoicingBtn;
+        else if (undoBtnRect.contains(e.position))
+            nextZone = HoverZone::UndoBtn;
+        else if (redoBtnRect.contains(e.position))
+            nextZone = HoverZone::RedoBtn;
+        else
+        {
+            for (int s = 0; s < dsp::kNumSnapshots; ++s)
+            {
+                if (snapPillRects[static_cast<size_t>(s)].contains(e.position))
+                {
+                    nextZone = HoverZone::SnapPill;
+                    nextIndex = s;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (nextZone == HoverZone::None)
+    {
+        const int hit = hitTestOrb(e.position);
+        if (hit >= 0)
+        {
+            nextZone = HoverZone::Orb;
+            nextIndex = hit;
+        }
+    }
+
+    setMouseCursor(nextZone != HoverZone::None ? juce::MouseCursor::PointingHandCursor
+                                               : juce::MouseCursor::NormalCursor);
+
+    if (nextZone != hoverZone || nextIndex != hoverIndex)
+    {
+        hoverZone = nextZone;
+        hoverIndex = nextIndex;
+        repaint();
+    }
+}
+
+void HarmonyStage::mouseExit(const juce::MouseEvent&)
+{
+    setMouseCursor(juce::MouseCursor::NormalCursor);
+    if (hoverZone != HoverZone::None || hoverIndex != -1)
+    {
+        hoverZone = HoverZone::None;
+        hoverIndex = -1;
+        repaint();
+    }
 }
 
 void HarmonyStage::mouseDoubleClick(const juce::MouseEvent& e)

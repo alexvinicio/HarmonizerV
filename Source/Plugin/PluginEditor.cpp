@@ -25,8 +25,8 @@ HarmonizerVEditor::HarmonizerVEditor(HarmonizerVProcessor& p)
     };
 
     setResizable(true, true);
-    setResizeLimits(840, 510, 1400, 900);
-    setSize(920, 598);
+    setResizeLimits(840, 518, 1400, 900);
+    setSize(920, 606);
     setWantsKeyboardFocus(true);
 
     startTimerHz(30);
@@ -43,7 +43,7 @@ void HarmonizerVEditor::timerCallback()
     const auto snap = proc.getTelemetry();
     headerBar.updateTelemetry(snap);
     harmonyStage.updateTelemetry(snap);
-    harmonyFeelBar.updateModeAccent(snap.activeMode);
+    harmonyFeelBar.updateTelemetry(snap);
 }
 
 void HarmonizerVEditor::paint(juce::Graphics& g)
@@ -58,7 +58,7 @@ void HarmonizerVEditor::resized()
     r.removeFromTop(8);
     voiceInspector.setBounds(r.removeFromBottom(116));
     r.removeFromBottom(8);
-    harmonyFeelBar.setBounds(r.removeFromBottom(36));
+    harmonyFeelBar.setBounds(r.removeFromBottom(44));
     r.removeFromBottom(8);
     harmonyStage.setBounds(r);
 }

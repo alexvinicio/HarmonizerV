@@ -28,10 +28,23 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
     void mouseDoubleClick(const juce::MouseEvent& e) override;
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
 private:
+    enum class HoverZone
+    {
+        None = 0,
+        VoicePill,
+        BankToggle,
+        VoicingBtn,
+        UndoBtn,
+        RedoBtn,
+        SnapPill,
+        Orb
+    };
     juce::Rectangle<float> getStageArea() const noexcept;
     juce::Point<float> voiceToPoint(int voiceIndex) const noexcept;
     float intervalToY(int interval) const noexcept;
@@ -59,6 +72,9 @@ private:
     int draggingVoice = -1;
     bool draggingFixed = false;
     bool gestureActive = false;
+
+    HoverZone hoverZone = HoverZone::None;
+    int hoverIndex = -1;
 
     std::array<juce::Rectangle<float>, dsp::kMaxVoices> pillRects{};
     juce::Rectangle<float> bankToggleRect{};

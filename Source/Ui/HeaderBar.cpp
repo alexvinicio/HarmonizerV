@@ -500,9 +500,38 @@ void HeaderBar::updateTelemetry(const dsp::TelemetrySnapshot& snap)
     powerBypassBtn.setActiveColour(modeAccent);
     mixKnob.setAccentColour(modeAccent);
 
-    // Smooth decay output peak meters
+    // Smooth decay output peak meters + peak hold (~0.8 s at 30 Hz)
     meterLevelL = std::max(snap.outputPeakL, meterLevelL * 0.80f);
     meterLevelR = std::max(snap.outputPeakR, meterLevelR * 0.80f);
+
+    if (snap.outputPeakL >= peakHoldL)
+    {
+        peakHoldL = snap.outputPeakL;
+        peakHoldTimerL = 24;
+    }
+    else if (peakHoldTimerL > 0)
+    {
+        --peakHoldTimerL;
+    }
+    else
+    {
+        peakHoldL *= 0.92f;
+    }
+
+    if (snap.outputPeakR >= peakHoldR)
+    {
+        peakHoldR = snap.outputPeakR;
+        peakHoldTimerR = 24;
+    }
+    else if (peakHoldTimerR > 0)
+    {
+        --peakHoldTimerR;
+    }
+    else
+    {
+        peakHoldR *= 0.92f;
+    }
+
     repaint();
 }
 
@@ -565,13 +594,14 @@ void HeaderBar::paint(juce::Graphics& g)
     g.setFont(Theme::makeFont(13.5f, true));
     g.drawFittedText("HarmonizerV", brandRect, juce::Justification::centredLeft, 1);
 
-    // Live detected pitch pill
+    // Live detected pitch pill with intonation deviation strip
+    const auto modeAccent = (latestSnap.activeMode == dsp::EngineMode::Live) ? Theme::liveAccent : Theme::studioAccent;
     if (!notePillBounds.isEmpty())
     {
         const auto np = notePillBounds.toFloat();
         g.setColour(Theme::bgElevated);
         g.fillRoundedRectangle(np, Theme::kPillRadius);
-        g.setColour(latestSnap.isVoiced ? Theme::liveAccent.withAlpha(0.6f) : Theme::borderSubtle);
+        g.setColour(latestSnap.isVoiced ? modeAccent.withAlpha(0.6f) : Theme::borderSubtle);
         g.drawRoundedRectangle(np.reduced(0.5f), Theme::kPillRadius, 1.0f);
 
         juce::String noteText = "--  --- Hz";
@@ -581,18 +611,47 @@ void HeaderBar::paint(juce::Graphics& g)
                      + " | " + juce::String(std::lround(latestSnap.detectedHz)) + " Hz";
         }
         g.setColour(latestSnap.isVoiced ? Theme::textPrimary : Theme::textMuted);
-        g.setFont(Theme::makeFont(11.5f, latestSnap.isVoiced));
-        g.drawFittedText(noteText, notePillBounds.reduced(4, 0), juce::Justification::centred, 1);
+        g.setFont(Theme::makeFont(11.0f, latestSnap.isVoiced));
+        const auto textBounds = latestSnap.isVoiced
+            ? notePillBounds.reduced(4, 0).translated(0, -2)
+            : notePillBounds.reduced(4, 0);
+        g.drawFittedText(noteText, textBounds, juce::Justification::centred, 1);
+
+        if (latestSnap.isVoiced && latestSnap.detectedHz > 20.0f)
+        {
+            const auto track = juce::Rectangle<float>(np.getX() + 8.0f,
+                                                      np.getBottom() - 4.0f,
+                                                      std::max(12.0f, np.getWidth() - 16.0f),
+                                                      2.2f);
+            g.setColour(Theme::bgCanvas);
+            g.fillRoundedRectangle(track, 1.1f);
+            g.setColour(Theme::borderFocus);
+            g.fillRect(track.getCentreX() - 0.5f, track.getY(), 1.0f, track.getHeight());
+
+            const float devCents = (latestSnap.detectedMidi - std::round(latestSnap.detectedMidi)) * 100.0f;
+            const float norm = std::clamp(devCents / 50.0f, -1.0f, 1.0f);
+            const auto indCol = (std::abs(devCents) <= 12.0f) ? Theme::liveAccent : Theme::warnAccent;
+
+            const float halfW = track.getWidth() * 0.5f;
+            const float barW = std::max(3.0f, std::abs(norm) * halfW);
+            const float barX = (norm >= 0.0f) ? track.getCentreX() : (track.getCentreX() - barW);
+            g.setColour(indCol.withAlpha(0.85f));
+            g.fillRoundedRectangle(juce::Rectangle<float>(barX, track.getY(), barW, track.getHeight()), 1.0f);
+
+            const float dotX = std::clamp(track.getCentreX() + norm * (halfW - 1.5f), track.getX() + 1.5f, track.getRight() - 1.5f);
+            g.setColour(indCol);
+            g.fillEllipse(dotX - 1.6f, track.getCentreY() - 1.6f, 3.2f, 3.2f);
+        }
     }
 
-    // Compact stereo output peak meter
+    // Compact stereo output peak meter + peak hold indicators
     if (!meterBounds.isEmpty())
     {
         const auto mf = meterBounds.toFloat();
         g.setColour(Theme::bgCanvas);
         g.fillRoundedRectangle(mf, 3.0f);
 
-        auto drawBar = [&](float level, float xPos, float w)
+        auto drawBar = [&](float level, float peakHold, float xPos, float w)
         {
             const float db = std::clamp(dsp::gainToDb(level), -48.0f, 3.0f);
             const float norm = (db + 48.0f) / 51.0f;
@@ -600,11 +659,20 @@ void HeaderBar::paint(juce::Graphics& g)
             const auto barRect = juce::Rectangle<float>(xPos, mf.getBottom() - h, w, h);
             g.setColour(db > -1.0f ? Theme::muteAccent : (db > -6.0f ? Theme::warnAccent : Theme::liveAccent));
             g.fillRoundedRectangle(barRect, 1.5f);
+
+            if (peakHold > 0.004f)
+            {
+                const float holdDb = std::clamp(dsp::gainToDb(peakHold), -48.0f, 3.0f);
+                const float holdNorm = (holdDb + 48.0f) / 51.0f;
+                const float holdY = std::clamp(mf.getBottom() - mf.getHeight() * holdNorm, mf.getY(), mf.getBottom() - 1.5f);
+                g.setColour(holdDb > -1.0f ? Theme::muteAccent : (holdDb > -6.0f ? Theme::warnAccent : Theme::textPrimary.withAlpha(0.85f)));
+                g.fillRect(xPos, holdY, w, 1.5f);
+            }
         };
 
         const float barW = (mf.getWidth() - 3.0f) * 0.5f;
-        drawBar(meterLevelL, mf.getX() + 1.0f, barW);
-        drawBar(meterLevelR, mf.getX() + 2.0f + barW, barW);
+        drawBar(meterLevelL, peakHoldL, mf.getX() + 1.0f, barW);
+        drawBar(meterLevelR, peakHoldR, mf.getX() + 2.0f + barW, barW);
     }
 }
 

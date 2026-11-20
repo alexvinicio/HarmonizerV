@@ -13,6 +13,7 @@ void TdPsolaVoice::prepare(double sampleRate, int voiceIdx, LiveBufferSize bufSi
     liveLatencySamples = computeLiveLatencySamples(fs, bufSize);
 
     formantSmoothAlpha = 1.0 - std::exp(-1.0 / (0.014 * fs));
+    lookbackAlpha = 1.0 - std::exp(-1.0 / (0.012 * fs));
     lastGlideMs = 28.0;
     glideAlpha = 1.0 - std::exp(-1.0 / (0.028 * fs));
     blendAlpha = static_cast<float>(1.0 - std::exp(-1.0 / (0.012 * fs)));
@@ -33,6 +34,7 @@ void TdPsolaVoice::reset() noexcept
 
     nextSynthCenter = 0.0;
     synthInitialized = false;
+    smoothedLookback = static_cast<double>(liveLatencySamples);
     smoothedShiftSt = 0.0;
     smoothedFormantRatio = 1.0;
     voicedBlend = 0.0f;
@@ -155,9 +157,17 @@ float TdPsolaVoice::processSample(const PitchMarkDetector& markDetector,
         : trackerT0;
 
     const double tOut = std::clamp(t0 / pitchRatio, 12.0, fs / 30.0);
-    const double formantMargin = std::max(1.0, smoothedFormantRatio);
-    const double maxSafeHalfW = static_cast<double>(liveLatencySamples) * 0.92 / std::max(1.0, formantMargin - 0.10);
-    const double halfWidth = std::clamp(t0 * 1.05, 16.0, std::max(32.0, maxSafeHalfW));
+    const double maxLowVoiceHalfW = fs * 0.016; // up to 16 ms (~65 Hz full period)
+    const double anaTighten = (smoothedFormantRatio > 1.0)
+        ? (1.0 / std::sqrt(smoothedFormantRatio))
+        : 1.0;
+    const double baseHalfW = std::max(t0 * 1.08 * anaTighten, std::min(tOut * 0.62, t0 * 1.25));
+    const double halfWidth = std::clamp(baseHalfW, 16.0, maxLowVoiceHalfW);
+
+    const double minCausalLookback = halfWidth + 16.0;
+    const double targetLookback = std::max(static_cast<double>(liveLatencySamples), minCausalLookback);
+    smoothedLookback += lookbackAlpha * (targetLookback - smoothedLookback);
+    const double activeLookback = std::max(minCausalLookback, smoothedLookback);
 
     if (!synthInitialized)
     {
@@ -168,11 +178,11 @@ float TdPsolaVoice::processSample(const PitchMarkDetector& markDetector,
     if (nextSynthCenter < static_cast<double>(currentSampleIndex) - halfWidth)
         nextSynthCenter = static_cast<double>(currentSampleIndex);
 
-    const double maxAllowedMark = static_cast<double>(std::max<int64_t>(0, currentSampleIndex - 12));
+    const double maxAllowedMark = static_cast<double>(std::max<int64_t>(0, currentSampleIndex - 14));
 
     while (nextSynthCenter - halfWidth <= static_cast<double>(currentSampleIndex))
     {
-        const double targetAnalysis = nextSynthCenter - static_cast<double>(liveLatencySamples);
+        const double targetAnalysis = nextSynthCenter - activeLookback;
         const double closestMark = markDetector.findClosestMark(targetAnalysis, maxAllowedMark, t0);
         const double analysisCenter = alignAnalysisCenterWsola(markDetector, closestMark, maxAllowedMark, voicingConfidence);
 
@@ -214,10 +224,12 @@ float TdPsolaVoice::processSample(const PitchMarkDetector& markDetector,
         const double w = 0.5 * (1.0 + std::cos(kPi * d / g.halfWidth));
         const double readPos = std::min(maxReadPos, g.analysisCenter + d * g.formantRatio);
 
-        // Band-split body: blend pure <4.5kHz body with full raw when naturalness is low
+        // Band-split body with upward-formant HF aliasing protection
         const double lowSample = static_cast<double>(markDetector.readLowSampleCubic(readPos));
         const double rawSample = static_cast<double>(markDetector.readRawSampleCubic(readPos));
-        const double s = rawSample + static_cast<double>(nat) * (lowSample - rawSample);
+        const double aliasGuard = std::clamp((g.formantRatio - 1.05) * 1.6, 0.0, 1.0);
+        const double bodyLpBlend = std::max(static_cast<double>(nat), aliasGuard);
+        const double s = rawSample + bodyLpBlend * (lowSample - rawSample);
 
         grainSum += s * w;
         winSum += w;
@@ -230,9 +242,10 @@ float TdPsolaVoice::processSample(const PitchMarkDetector& markDetector,
         ? static_cast<float>((grainSum / smoothDenom) * downShiftComp)
         : 0.0f;
 
-    // Clean decorrelated air (>4.5 kHz) pass-through prevents robotic consonant buzz
+    // Clean decorrelated air (>4.5 kHz) aligned with voiced body delay
+    const int64_t bodyDelay = static_cast<int64_t>(std::llround(activeLookback));
     const int64_t airOffset = static_cast<int64_t>(voiceIndex * 19);
-    const float cleanAir = markDetector.readHighSampleInt(currentSampleIndex - liveLatencySamples - airOffset);
+    const float cleanAir = markDetector.readHighSampleInt(currentSampleIndex - bodyDelay - airOffset);
     const float voicedOut = bodyOut + (0.50f * nat) * cleanAir;
 
     // Soft-ducked unvoiced consonant pass-through

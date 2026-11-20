@@ -98,6 +98,7 @@ void HarmonizerEngine::reset() noexcept
     telemetry.bypassed.store(false, std::memory_order_relaxed);
     telemetry.activeVoiceBankCount.store(4, std::memory_order_relaxed);
     telemetry.inputTuneCorrectionCents.store(0.0f, std::memory_order_relaxed);
+    telemetry.deEssReductionDb.store(0.0f, std::memory_order_relaxed);
     for (int v = 0; v < kMaxVoices; ++v)
     {
         telemetry.voiceRms[static_cast<size_t>(v)].store(0.0f, std::memory_order_relaxed);
@@ -133,6 +134,7 @@ TelemetrySnapshot HarmonizerEngine::getTelemetry() const noexcept
     snap.activeMode = static_cast<EngineMode>(telemetry.activeMode.load(std::memory_order_relaxed));
     snap.activeHarmonyMode = static_cast<HarmonyMode>(telemetry.activeHarmonyMode.load(std::memory_order_relaxed));
     snap.inputTuneCorrectionCents = telemetry.inputTuneCorrectionCents.load(std::memory_order_relaxed);
+    snap.deEssReductionDb = telemetry.deEssReductionDb.load(std::memory_order_relaxed);
     for (int v = 0; v < kMaxVoices; ++v)
     {
         snap.voiceRms[static_cast<size_t>(v)] = telemetry.voiceRms[static_cast<size_t>(v)].load(std::memory_order_relaxed);
@@ -585,7 +587,8 @@ void HarmonizerEngine::processSubBlock(const float* const* inChannels,
     telemetry.activeVoiceBankCount.store(voiceLimit, std::memory_order_relaxed);
     telemetry.activeMode.store(static_cast<int>(activeMode), std::memory_order_relaxed);
     telemetry.activeHarmonyMode.store(static_cast<int>(globalParams.harmonyMode), std::memory_order_relaxed);
-    telemetry.inputTuneCorrectionCents.store(smoothedCorrectionSt * 100.0f, std::memory_order_relaxed);
+    telemetry.inputTuneCorrectionCents.store(globalParams.bypass ? 0.0f : (smoothedCorrectionSt * 100.0f), std::memory_order_relaxed);
+    telemetry.deEssReductionDb.store(globalParams.bypass ? 0.0f : harmonyBusFx.getDeEssReductionDb(), std::memory_order_relaxed);
 }
 
 } // namespace harmonizer::dsp

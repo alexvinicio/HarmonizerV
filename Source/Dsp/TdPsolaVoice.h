@@ -15,7 +15,11 @@ public:
     void prepare(double sampleRate, int voiceIdx = 0, LiveBufferSize bufSize = LiveBufferSize::Fast256);
     void reset() noexcept;
 
-    void setLatencySamples(int newLatencySamples) noexcept { liveLatencySamples = std::max(64, newLatencySamples); }
+    void setLatencySamples(int newLatencySamples) noexcept
+    {
+        liveLatencySamples = std::max(64, newLatencySamples);
+        smoothedLookback = static_cast<double>(liveLatencySamples);
+    }
     int getLatencySamples() const noexcept { return liveLatencySamples; }
 
     float processSample(const PitchMarkDetector& markDetector,
@@ -52,6 +56,8 @@ private:
     double fs = 48000.0;
     int voiceIndex = 0;
     int liveLatencySamples = 256;
+    double smoothedLookback = 256.0;
+    double lookbackAlpha = 0.01;
 
     double nextSynthCenter = 0.0;
     bool synthInitialized = false;
