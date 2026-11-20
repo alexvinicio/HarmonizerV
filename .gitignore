@@ -1,6 +1,7 @@
 build/
 build-*/
 Backups/
+Releases/
 .vs/
 out/
 *.user

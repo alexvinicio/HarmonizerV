@@ -3,6 +3,8 @@
 #include "Ui/Localization.h"
 #include "Ui/Theme.h"
 
+#include <algorithm>
+
 namespace harmonizer::ui
 {
 

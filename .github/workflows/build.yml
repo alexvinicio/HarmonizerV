@@ -3,6 +3,7 @@ name: Build and Validate HarmonizerV
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -48,7 +49,7 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile pluginval.zip
           Expand-Archive -Path pluginval.zip -DestinationPath pluginval_bin -Force
           $exe = Get-ChildItem -Path pluginval_bin -Filter "pluginval.exe" -Recurse | Select-Object -First 1
-          & $exe.FullName --strictness-level 5 --validate "${{ matrix.vst3_path }}"
+          & $exe.FullName --strictness-level 5 --validate-in-process "${{ matrix.vst3_path }}"
 
       - name: Download and run pluginval (macOS)
         if: matrix.os == 'macos-14'
@@ -56,8 +57,8 @@ jobs:
           curl -L -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip"
           unzip -q pluginval.zip -d pluginval_bin
           APP=$(find pluginval_bin -name "pluginval.app" | head -n 1)
-          "$APP/Contents/MacOS/pluginval" --strictness-level 5 --validate "${{ matrix.vst3_path }}"
-          "$APP/Contents/MacOS/pluginval" --strictness-level 5 --validate "${{ matrix.au_path }}"
+          "$APP/Contents/MacOS/pluginval" --strictness-level 5 --validate-in-process "${{ matrix.vst3_path }}"
+          "$APP/Contents/MacOS/pluginval" --strictness-level 5 --validate-in-process "${{ matrix.au_path }}"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -67,4 +68,6 @@ jobs:
             ${{ matrix.vst3_path }}
             ${{ matrix.au_path }}
             ${{ matrix.standalone_path }}
+            README.md
+            scripts/install_vst3_windows.ps1
           if-no-files-found: ignore
