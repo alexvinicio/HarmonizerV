@@ -18,15 +18,23 @@ HarmonizerVEditor::HarmonizerVEditor(HarmonizerVProcessor& p)
     addAndMakeVisible(harmonyStage);
     addAndMakeVisible(harmonyFeelBar);
     addAndMakeVisible(voiceInspector);
+    addChildComponent(aboutOverlay);
+
+    headerBar.onAboutClicked = [this]()
+    {
+        aboutOverlay.showOverlay();
+    };
 
     harmonyStage.onVoiceSelected = [this](int voiceIdx)
     {
         voiceInspector.setSelectedVoice(voiceIdx);
     };
 
+    ui::LocalizationManager::getInstance().addListener(this);
+
     setResizable(true, true);
-    setResizeLimits(840, 518, 1400, 900);
-    setSize(920, 606);
+    setResizeLimits(860, 518, 1400, 900);
+    setSize(940, 606);
     setWantsKeyboardFocus(true);
 
     startTimerHz(30);
@@ -34,8 +42,18 @@ HarmonizerVEditor::HarmonizerVEditor(HarmonizerVProcessor& p)
 
 HarmonizerVEditor::~HarmonizerVEditor()
 {
+    ui::LocalizationManager::getInstance().removeListener(this);
     stopTimer();
     setLookAndFeel(nullptr);
+}
+
+void HarmonizerVEditor::languageChanged(dsp::Language)
+{
+    headerBar.refreshLocalization();
+    harmonyStage.refreshLocalization();
+    harmonyFeelBar.refreshLocalization();
+    voiceInspector.refreshLocalization();
+    aboutOverlay.refreshLocalization();
 }
 
 void HarmonizerVEditor::timerCallback()
@@ -61,10 +79,17 @@ void HarmonizerVEditor::resized()
     harmonyFeelBar.setBounds(r.removeFromBottom(44));
     r.removeFromBottom(8);
     harmonyStage.setBounds(r);
+    aboutOverlay.setBounds(getLocalBounds());
 }
 
 bool HarmonizerVEditor::keyPressed(const juce::KeyPress& key)
 {
+    if (key == juce::KeyPress::escapeKey && aboutOverlay.isVisible())
+    {
+        aboutOverlay.hideOverlay();
+        return true;
+    }
+
     if (key == juce::KeyPress::escapeKey && proc.getLiveMidiController().getLearningTarget() >= 0)
     {
         proc.getLiveMidiController().cancelLearn();

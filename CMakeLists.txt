@@ -7,7 +7,7 @@ if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 endif()
 
-project(HarmonizerV VERSION 2.5.0 LANGUAGES C CXX)
+project(HarmonizerV VERSION 2.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,6 +54,7 @@ add_library(HarmonizerV_DSP STATIC
     Source/Dsp/MidiHarmonyController.h
     Source/Dsp/MidiHarmonyController.cpp
     Source/Dsp/MidiControlMap.h
+    Source/Dsp/LocalizationTable.h
     Source/Dsp/VoicingPresets.h
     Source/Dsp/SnapshotBank.h
     Source/Dsp/HarmonizerEngine.h
@@ -101,6 +102,7 @@ juce_add_plugin(HarmonizerV
 )
 
 target_sources(HarmonizerV PRIVATE
+    Source/Plugin/AppInfo.h
     Source/Plugin/ParameterIds.h
     Source/Plugin/SnapshotManager.h
     Source/Plugin/SnapshotManager.cpp
@@ -113,8 +115,12 @@ target_sources(HarmonizerV PRIVATE
     Source/Plugin/PluginEditor.h
     Source/Plugin/PluginEditor.cpp
     Source/Ui/Theme.h
+    Source/Ui/Localization.h
+    Source/Ui/Localization.cpp
     Source/Ui/ModernLookAndFeel.h
     Source/Ui/ModernLookAndFeel.cpp
+    Source/Ui/AboutOverlay.h
+    Source/Ui/AboutOverlay.cpp
     Source/Ui/HeaderBar.h
     Source/Ui/HeaderBar.cpp
     Source/Ui/HarmonyFeelBar.h

@@ -19,6 +19,7 @@ public:
 
     void setSelectedVoice(int voiceIndex);
     int getSelectedVoice() const noexcept { return selectedVoice; }
+    void refreshLocalization();
 
     void resized() override;
     void paint(juce::Graphics& g) override;

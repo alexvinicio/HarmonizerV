@@ -6,6 +6,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <functional>
 #include <memory>
 
 namespace harmonizer::ui
@@ -17,6 +18,7 @@ class EngineModePill final : public juce::Component,
 public:
     explicit EngineModePill(juce::AudioProcessorValueTreeState& apvts);
 
+    void refreshLocalization();
     void setLatencyText(const juce::String& text);
     void paint(juce::Graphics& g) override;
     void mouseMove(const juce::MouseEvent& e) override;
@@ -36,11 +38,13 @@ private:
     juce::String latencyLabel{ "5.3 ms" };
 };
 
-class HarmonyModePill final : public juce::Component
+class HarmonyModePill final : public juce::Component,
+                              public juce::SettableTooltipClient
 {
 public:
     explicit HarmonyModePill(juce::AudioProcessorValueTreeState& apvts);
 
+    void refreshLocalization();
     void paint(juce::Graphics& g) override;
     void mouseDown(const juce::MouseEvent& e) override;
 
@@ -57,6 +61,7 @@ class PowerBypassButton final : public juce::Component,
 public:
     PowerBypassButton(juce::AudioProcessorValueTreeState& apvts, LiveMidiController& liveMidi);
 
+    void refreshLocalization();
     void setActiveColour(juce::Colour c);
     void paint(juce::Graphics& g) override;
     void mouseEnter(const juce::MouseEvent&) override;
@@ -75,18 +80,33 @@ private:
     bool hovered = false;
 };
 
-class HeaderBar final : public juce::Component
+class HeaderBar final : public juce::Component,
+                        public juce::SettableTooltipClient
 {
 public:
     explicit HeaderBar(HarmonizerVProcessor& proc);
 
+    std::function<void()> onAboutClicked;
+
+    void refreshLocalization();
     void updateTelemetry(const dsp::TelemetrySnapshot& snap);
     void rebuildPresetMenu();
 
     void resized() override;
     void paint(juce::Graphics& g) override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
+    void mouseDown(const juce::MouseEvent& e) override;
 
 private:
+    enum class BrandHover
+    {
+        None = 0,
+        Title,
+        LangChip,
+        AboutChip
+    };
+
     void openSavePresetDialog();
     static juce::String midiToNoteName(float midiNote);
 
@@ -109,6 +129,11 @@ private:
 
     LabeledKnob mixKnob{ "MIX", Theme::liveAccent };
     LabeledKnob outKnob{ "OUT", Theme::textPrimary };
+
+    juce::Rectangle<float> brandTitleRect;
+    juce::Rectangle<float> langChipRect;
+    juce::Rectangle<float> aboutChipRect;
+    BrandHover brandHover = BrandHover::None;
 
     juce::Rectangle<int> notePillBounds;
     juce::Rectangle<int> meterBounds;

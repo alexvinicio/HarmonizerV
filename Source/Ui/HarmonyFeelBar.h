@@ -17,6 +17,7 @@ class HarmonyFeelBar final : public juce::Component
 public:
     explicit HarmonyFeelBar(HarmonizerVProcessor& proc);
 
+    void refreshLocalization();
     void updateModeAccent(dsp::EngineMode mode);
     void updateTelemetry(const dsp::TelemetrySnapshot& snap);
     void resized() override;

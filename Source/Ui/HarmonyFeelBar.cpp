@@ -1,5 +1,6 @@
 #include "Ui/HarmonyFeelBar.h"
 #include "Plugin/ParameterIds.h"
+#include "Ui/Localization.h"
 #include "Ui/Theme.h"
 
 #include <algorithm>
@@ -231,34 +232,44 @@ HarmonyFeelBar::HarmonyFeelBar(HarmonizerVProcessor& proc)
         apvts, params::inputTune, "TUNE",
         [](float v) { return (v < 0.5f) ? juce::String("OFF") : (juce::String(std::lround(v)) + "%"); },
         FeelPillSlider::MeterKind::TuneCents,
-        "Input pitch correction (0-100%) | Live meter shows pitch pull in cents | Double-click to reset");
+        tr(dsp::TextKey::TuneTooltip));
 
     pills[1] = std::make_unique<FeelPillSlider>(
         apvts, params::glideMs, "GLIDE",
         [](float v) { return juce::String(std::lround(v)) + " ms"; },
         FeelPillSlider::MeterKind::None,
-        "Pitch transition glide time (0-150 ms) | Double-click to reset");
+        tr(dsp::TextKey::GlideTooltip));
 
     pills[2] = std::make_unique<FeelPillSlider>(
         apvts, params::naturalness, "NATURAL",
         [](float v) { return juce::String(std::lround(v)) + "%"; },
         FeelPillSlider::MeterKind::None,
-        "Formant follow and high-band vocal air (0-100%) | Double-click to reset");
+        tr(dsp::TextKey::NaturalTooltip));
 
     pills[3] = std::make_unique<FeelPillSlider>(
         apvts, params::deEssAmount, "DE-ESS",
         [](float v) { return juce::String(std::lround(v)) + "%"; },
         FeelPillSlider::MeterKind::DeEssGrDb,
-        "Harmony bus sibilance control (0-100%) | Live meter shows HF gain reduction (dB) | Double-click to reset");
+        tr(dsp::TextKey::DeEssTooltip));
 
     pills[4] = std::make_unique<FeelPillSlider>(
         apvts, params::spaceAmount, "SPACE",
         [](float v) { return juce::String(std::lround(v)) + "%"; },
         FeelPillSlider::MeterKind::None,
-        "Studio stereo vocal space on harmony bus (0-100%) | Double-click to reset");
+        tr(dsp::TextKey::SpaceTooltip));
 
     for (auto& p : pills)
         addAndMakeVisible(*p);
+}
+
+void HarmonyFeelBar::refreshLocalization()
+{
+    pills[0]->setTooltip(tr(dsp::TextKey::TuneTooltip));
+    pills[1]->setTooltip(tr(dsp::TextKey::GlideTooltip));
+    pills[2]->setTooltip(tr(dsp::TextKey::NaturalTooltip));
+    pills[3]->setTooltip(tr(dsp::TextKey::DeEssTooltip));
+    pills[4]->setTooltip(tr(dsp::TextKey::SpaceTooltip));
+    repaint();
 }
 
 void HarmonyFeelBar::updateModeAccent(dsp::EngineMode mode)

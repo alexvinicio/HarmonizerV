@@ -2,6 +2,7 @@
 #include "Dsp/ScaleHarmonizer.h"
 #include "Dsp/VoicingPresets.h"
 #include "Plugin/ParameterIds.h"
+#include "Ui/Localization.h"
 #include "Ui/Theme.h"
 
 #include <algorithm>
@@ -15,7 +16,13 @@ HarmonyStage::HarmonyStage(HarmonizerVProcessor& proc)
     : processor(proc)
 {
     setMouseCursor(juce::MouseCursor::NormalCursor);
-    setTooltip("Drag orbs: Pan/Pitch | Wheel: Level | 4V/8V voices | VOICING menu | Undo/Redo | Snapshots A-D");
+    refreshLocalization();
+}
+
+void HarmonyStage::refreshLocalization()
+{
+    setTooltip(tr(dsp::TextKey::StageTooltip));
+    repaint();
 }
 
 int HarmonyStage::getVisibleVoiceCount() const noexcept
@@ -221,7 +228,7 @@ void HarmonyStage::showVoicingMenu()
     {
         if (i == 5)
             menu.addSeparator();
-        menu.addItem(i + 1, dsp::kVoicingPresets[static_cast<size_t>(i)].name);
+        menu.addItem(i + 1, trVoicing(i));
     }
 
     menu.showMenuAsync(
@@ -252,23 +259,23 @@ void HarmonyStage::showSnapshotContextMenu(int slotIndex)
     const bool hasBinding = dsp::isValidBinding(liveMidi.getBinding(midiTarget));
 
     juce::PopupMenu menu;
-    menu.addItem(1, "Store Current into " + targetLetter);
+    menu.addItem(1, trFormat(dsp::TextKey::SnapStoreInto, targetLetter));
     menu.addSeparator();
 
     for (int other = 0; other < dsp::kNumSnapshots; ++other)
     {
         if (other != slotIndex && snapMgr.isSnapshotPopulated(other))
-            menu.addItem(10 + other, "Copy from " + juce::String(kLetters[static_cast<size_t>(other)]));
+            menu.addItem(10 + other, trFormat(dsp::TextKey::SnapCopyFrom, juce::String(kLetters[static_cast<size_t>(other)])));
     }
 
     menu.addSeparator();
     const bool canClear = snapMgr.isSnapshotPopulated(slotIndex) && (slotIndex != activeIdx);
-    menu.addItem(20, "Clear " + targetLetter, canClear, false);
+    menu.addItem(20, trFormat(dsp::TextKey::SnapClear, targetLetter), canClear, false);
     menu.addSeparator();
-    menu.addItem(100, "MIDI: " + liveMidi.getBindingLabel(midiTarget), false, false);
-    menu.addItem(30, isLearning ? "Cancel MIDI Learn" : ("MIDI Learn " + targetLetter), true, isLearning);
-    menu.addItem(31, "Reset MIDI to PC " + juce::String(slotIndex + 1));
-    menu.addItem(32, "Clear MIDI Binding", hasBinding, false);
+    menu.addItem(100, tr(dsp::TextKey::MidiPrefix) + liveMidi.getBindingLabel(midiTarget), false, false);
+    menu.addItem(30, isLearning ? tr(dsp::TextKey::CancelMidiLearn) : trFormat(dsp::TextKey::SnapMidiLearn, targetLetter), true, isLearning);
+    menu.addItem(31, trFormat(dsp::TextKey::SnapResetPc, juce::String(slotIndex + 1)));
+    menu.addItem(32, tr(dsp::TextKey::ClearMidiBinding), hasBinding, false);
 
     menu.showMenuAsync(
         juce::PopupMenu::Options().withTargetScreenArea(localAreaToGlobal(snapPillRects[static_cast<size_t>(slotIndex)].toNearestInt())),
@@ -394,7 +401,7 @@ void HarmonyStage::paint(juce::Graphics& g)
 
         g.setColour(Theme::textPrimary);
         g.setFont(Theme::makeFont(10.0f, true));
-        g.drawFittedText("VOICING", voicingBtnRect.withTrimmedRight(13.0f).reduced(4.0f, 0.0f).toNearestInt(),
+        g.drawFittedText(tr(dsp::TextKey::VoicingBtn), voicingBtnRect.withTrimmedRight(13.0f).reduced(4.0f, 0.0f).toNearestInt(),
                          juce::Justification::centred, 1);
 
         const float cx = voicingBtnRect.getRight() - 8.5f;
@@ -509,21 +516,19 @@ void HarmonyStage::paint(juce::Graphics& g)
         {
             g.setColour(Theme::warnAccent);
             g.setFont(Theme::makeFont(10.0f, true));
-            hintText = "MIDI LEARN: Send PC, CC, or Note for Snap " + juce::String(kSnapLetters[static_cast<size_t>(learningTarget)]);
+            hintText = trFormat(dsp::TextKey::MidiLearnSnapHint, juce::String(kSnapLetters[static_cast<size_t>(learningTarget)]));
         }
         else if (learningTarget == static_cast<int>(dsp::LiveMidiTarget::Bypass))
         {
             g.setColour(Theme::warnAccent);
             g.setFont(Theme::makeFont(10.0f, true));
-            hintText = "MIDI LEARN: Send PC, CC, or Note for Bypass";
+            hintText = tr(dsp::TextKey::MidiLearnBypassHint);
         }
         else
         {
             g.setColour(isMidiMode ? Theme::getVoiceColour(0).withAlpha(0.85f) : Theme::textMuted);
             g.setFont(Theme::makeFont(10.0f, isMidiMode));
-            hintText = isMidiMode
-                ? "MIDI | Play Chords | Drag X: Pan | Wheel: Level"
-                : "Drag: Pan / Pitch | Wheel: Level | Dbl-Click: On/Off";
+            hintText = isMidiMode ? tr(dsp::TextKey::StageMidiHint) : tr(dsp::TextKey::StageAutoHint);
         }
 
         g.drawFittedText(hintText,
@@ -544,7 +549,7 @@ void HarmonyStage::paint(juce::Graphics& g)
         g.drawHorizontalLine(static_cast<int>(std::lround(y)), area.getX(), area.getRight());
 
         const juce::String lbl = isLead
-            ? juce::String("Lead")
+            ? tr(dsp::TextKey::LeadAxis)
             : juce::String(dsp::ScaleHarmonizer::formatIntervalLabel(step, scaleType));
 
         g.setColour(isLead ? Theme::textSecondary : Theme::textMuted);
@@ -564,7 +569,7 @@ void HarmonyStage::paint(juce::Graphics& g)
     g.setColour(Theme::textMuted);
     g.setFont(Theme::makeFont(10.5f));
     g.drawFittedText("L", juce::Rectangle<int>(static_cast<int>(area.getX()) - 10, static_cast<int>(area.getBottom()) + 3, 20, 14), juce::Justification::centred, 1);
-    g.drawFittedText("Center", juce::Rectangle<int>(static_cast<int>(area.getCentreX()) - 28, static_cast<int>(area.getBottom()) + 3, 56, 14), juce::Justification::centred, 1);
+    g.drawFittedText(tr(dsp::TextKey::CenterAxis), juce::Rectangle<int>(static_cast<int>(area.getCentreX()) - 28, static_cast<int>(area.getBottom()) + 3, 56, 14), juce::Justification::centred, 1);
     g.drawFittedText("R", juce::Rectangle<int>(static_cast<int>(area.getRight()) - 10, static_cast<int>(area.getBottom()) + 3, 20, 14), juce::Justification::centred, 1);
 
     // Lead vocal live pulse at (Center, Unison)
@@ -668,7 +673,7 @@ void HarmonyStage::paint(juce::Graphics& g)
         g.drawRoundedRectangle(badge.reduced(0.5f), 4.5f, 1.0f);
         g.setColour(Theme::muteAccent);
         g.setFont(Theme::makeFont(9.5f, true));
-        g.drawFittedText("BYPASSED", badge.toNearestInt(), juce::Justification::centred, 1);
+        g.drawFittedText(tr(dsp::TextKey::BypassedBadge), badge.toNearestInt(), juce::Justification::centred, 1);
     }
 }
 

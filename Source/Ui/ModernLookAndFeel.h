@@ -54,6 +54,7 @@ public:
 
     void setAccentColour(juce::Colour c);
     void setTitle(const juce::String& newTitle);
+    void setTooltip(const juce::String& text);
     void setValueFormatter(std::function<juce::String(double)> formatter);
 
     void attach(juce::AudioProcessorValueTreeState& apvts, const juce::String& paramId);

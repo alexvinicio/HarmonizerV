@@ -1,9 +1,11 @@
 #pragma once
 
 #include "Plugin/PluginProcessor.h"
+#include "Ui/AboutOverlay.h"
 #include "Ui/HarmonyFeelBar.h"
 #include "Ui/HarmonyStage.h"
 #include "Ui/HeaderBar.h"
+#include "Ui/Localization.h"
 #include "Ui/ModernLookAndFeel.h"
 #include "Ui/VoiceInspector.h"
 
@@ -13,7 +15,8 @@ namespace harmonizer
 {
 
 class HarmonizerVEditor final : public juce::AudioProcessorEditor,
-                                private juce::Timer
+                                private juce::Timer,
+                                private ui::LocalizationManager::Listener
 {
 public:
     explicit HarmonizerVEditor(HarmonizerVProcessor& processor);
@@ -25,6 +28,7 @@ public:
 
 private:
     void timerCallback() override;
+    void languageChanged(dsp::Language newLanguage) override;
 
     HarmonizerVProcessor& proc;
     ui::ModernLookAndFeel lookAndFeel;
@@ -33,6 +37,7 @@ private:
     ui::HarmonyStage harmonyStage;
     ui::HarmonyFeelBar harmonyFeelBar;
     ui::VoiceInspector voiceInspector;
+    ui::AboutOverlay aboutOverlay;
     juce::TooltipWindow tooltipWindow{ this, 600 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(HarmonizerVEditor)

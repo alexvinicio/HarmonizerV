@@ -199,6 +199,11 @@ void LabeledKnob::setTitle(const juce::String& newTitle)
     }
 }
 
+void LabeledKnob::setTooltip(const juce::String& text)
+{
+    slider.setTooltip(text);
+}
+
 void LabeledKnob::setValueFormatter(std::function<juce::String(double)> formatter)
 {
     slider.customFormatter = std::move(formatter);

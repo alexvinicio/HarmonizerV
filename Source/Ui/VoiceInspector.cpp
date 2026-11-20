@@ -1,6 +1,7 @@
 #include "Ui/VoiceInspector.h"
 #include "Dsp/ScaleHarmonizer.h"
 #include "Plugin/ParameterIds.h"
+#include "Ui/Localization.h"
 #include "Ui/Theme.h"
 
 #include <algorithm>
@@ -112,6 +113,7 @@ VoiceInspector::VoiceInspector(HarmonizerVProcessor& proc)
         processor.getApvts().addParameterListener(params::voiceParamId(v, params::vFixed), this);
 
     bindSelectedVoice();
+    refreshLocalization();
 }
 
 VoiceInspector::~VoiceInspector()
@@ -203,7 +205,8 @@ void VoiceInspector::bindSelectedVoice()
     if (auto* rawFix = apvts.getRawParameterValue(params::voiceParamId(selectedVoice, params::vFixed)))
         isFixed = rawFix->load(std::memory_order_relaxed) >= 0.5f;
 
-    intervalKnob.setTitle(isFixed ? "FIX NOTE" : "INTERVAL");
+    intervalKnob.setTitle(tr(isFixed ? dsp::TextKey::KnobFixNote : dsp::TextKey::KnobInterval));
+    intervalKnob.setTooltip(tr(isFixed ? dsp::TextKey::KnobFixNoteTooltip : dsp::TextKey::KnobIntervalTooltip));
     intervalKnob.attach(apvts, params::voiceParamId(selectedVoice, isFixed ? params::vFixedNote : params::vInterval));
     detuneKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vDetune));
     formantKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vFormant));
@@ -213,6 +216,39 @@ void VoiceInspector::bindSelectedVoice()
     panKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vPan));
     levelKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vGainDb));
     vibratoKnob.attach(apvts, params::voiceParamId(selectedVoice, params::vVibrato));
+}
+
+void VoiceInspector::refreshLocalization()
+{
+    fixedBtn.setTooltip(tr(dsp::TextKey::FixBtnTooltip));
+
+    bool isFixed = false;
+    if (auto* rawFix = processor.getApvts().getRawParameterValue(params::voiceParamId(selectedVoice, params::vFixed)))
+        isFixed = rawFix->load(std::memory_order_relaxed) >= 0.5f;
+
+    intervalKnob.setTitle(tr(isFixed ? dsp::TextKey::KnobFixNote : dsp::TextKey::KnobInterval));
+    intervalKnob.setTooltip(tr(isFixed ? dsp::TextKey::KnobFixNoteTooltip : dsp::TextKey::KnobIntervalTooltip));
+
+    detuneKnob.setTitle(tr(dsp::TextKey::KnobDetune));
+    detuneKnob.setTooltip(tr(dsp::TextKey::KnobDetuneTooltip));
+    formantKnob.setTitle(tr(dsp::TextKey::KnobFormant));
+    formantKnob.setTooltip(tr(dsp::TextKey::KnobFormantTooltip));
+    delayKnob.setTitle(tr(dsp::TextKey::KnobDelay));
+    delayKnob.setTooltip(tr(dsp::TextKey::KnobDelayTooltip));
+    hpfKnob.setTitle(tr(dsp::TextKey::KnobHpf));
+    hpfKnob.setTooltip(tr(dsp::TextKey::KnobHpfTooltip));
+    lpfKnob.setTitle(tr(dsp::TextKey::KnobLpf));
+    lpfKnob.setTooltip(tr(dsp::TextKey::KnobLpfTooltip));
+    panKnob.setTitle(tr(dsp::TextKey::KnobPan));
+    panKnob.setTooltip(tr(dsp::TextKey::KnobPanTooltip));
+    levelKnob.setTitle(tr(dsp::TextKey::KnobLevel));
+    levelKnob.setTooltip(tr(dsp::TextKey::KnobLevelTooltip));
+    vibratoKnob.setTitle(tr(dsp::TextKey::KnobVib));
+    vibratoKnob.setTooltip(tr(dsp::TextKey::KnobVibTooltip));
+    humanizeKnob.setTitle(tr(dsp::TextKey::KnobHumanize));
+    humanizeKnob.setTooltip(tr(dsp::TextKey::KnobHumanizeTooltip));
+
+    repaint();
 }
 
 void VoiceInspector::resized()
@@ -267,7 +303,8 @@ void VoiceInspector::paint(juce::Graphics& g)
     const auto titleArea = getLocalBounds().reduced(14, 10).withWidth(68).withHeight(20);
     g.setColour(voiceCol);
     g.setFont(Theme::makeFont(12.5f, true));
-    g.drawFittedText("VOICE " + juce::String(selectedVoice + 1), titleArea, juce::Justification::centredLeft, 1);
+    g.drawFittedText(tr(dsp::TextKey::VoicePrefix) + juce::String(selectedVoice + 1),
+                     titleArea, juce::Justification::centredLeft, 1);
 
     // Subtle divider before Humanize
     g.setColour(Theme::borderSubtle);

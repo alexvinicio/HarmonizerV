@@ -19,6 +19,7 @@ public:
     void setSelectedVoice(int voiceIndex);
     int getSelectedVoice() const noexcept { return selectedVoice; }
     void updateTelemetry(const dsp::TelemetrySnapshot& snap);
+    void refreshLocalization();
 
     std::function<void(int)> onVoiceSelected;
 

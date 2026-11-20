@@ -1,6 +1,8 @@
 #include "Ui/HeaderBar.h"
 #include "Dsp/ScaleHarmonizer.h"
+#include "Plugin/AppInfo.h"
 #include "Plugin/ParameterIds.h"
+#include "Ui/Localization.h"
 #include "Ui/Theme.h"
 
 #include <algorithm>
@@ -35,7 +37,12 @@ EngineModePill::EngineModePill(juce::AudioProcessorValueTreeState& apvts)
     }
 
     setMouseCursor(juce::MouseCursor::PointingHandCursor);
-    setTooltip("LIVE / STUDIO engine | Click latency badge in LIVE mode to change DSP buffer (2.7-10.7 ms)");
+    refreshLocalization();
+}
+
+void EngineModePill::refreshLocalization()
+{
+    setTooltip(tr(dsp::TextKey::EngineTooltip));
 }
 
 void EngineModePill::handleModeChanged(float newValue)
@@ -62,10 +69,10 @@ void EngineModePill::setLatencyText(const juce::String& text)
 void EngineModePill::openLiveBufferMenu()
 {
     juce::PopupMenu menu;
-    menu.addItem(1, "Ultra - 2.7 ms (128 smp)", true, currentLiveBuffer == 0);
-    menu.addItem(2, "Fast - 5.3 ms (256 smp)",  true, currentLiveBuffer == 1);
-    menu.addItem(3, "Low - 8.0 ms (384 smp)",   true, currentLiveBuffer == 2);
-    menu.addItem(4, "Safe - 10.7 ms (512 smp)", true, currentLiveBuffer == 3);
+    menu.addItem(1, tr(dsp::TextKey::BufUltra), true, currentLiveBuffer == 0);
+    menu.addItem(2, tr(dsp::TextKey::BufFast),  true, currentLiveBuffer == 1);
+    menu.addItem(3, tr(dsp::TextKey::BufLow),   true, currentLiveBuffer == 2);
+    menu.addItem(4, tr(dsp::TextKey::BufSafe),  true, currentLiveBuffer == 3);
 
     menu.showMenuAsync(
         juce::PopupMenu::Options().withTargetComponent(this),
@@ -186,6 +193,12 @@ HarmonyModePill::HarmonyModePill(juce::AudioProcessorValueTreeState& apvts)
         attachment->sendInitialUpdate();
     }
     setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    refreshLocalization();
+}
+
+void HarmonyModePill::refreshLocalization()
+{
+    setTooltip(tr(dsp::TextKey::HarmonyModeTooltip));
 }
 
 void HarmonyModePill::handleParameterChanged(float newValue)
@@ -252,7 +265,12 @@ PowerBypassButton::PowerBypassButton(juce::AudioProcessorValueTreeState& apvts, 
         attachment->sendInitialUpdate();
     }
     setMouseCursor(juce::MouseCursor::PointingHandCursor);
-    setTooltip("Global Bypass (Click: Toggle | Right-Click: MIDI Learn)");
+    refreshLocalization();
+}
+
+void PowerBypassButton::refreshLocalization()
+{
+    setTooltip(tr(dsp::TextKey::BypassTooltip));
 }
 
 void PowerBypassButton::setActiveColour(juce::Colour c)
@@ -289,10 +307,10 @@ void PowerBypassButton::openContextMenu()
     const bool hasBinding = dsp::isValidBinding(binding);
 
     juce::PopupMenu menu;
-    menu.addItem(100, "MIDI: " + liveMidiController.getBindingLabel(dsp::LiveMidiTarget::Bypass), false, false);
+    menu.addItem(100, tr(dsp::TextKey::MidiPrefix) + liveMidiController.getBindingLabel(dsp::LiveMidiTarget::Bypass), false, false);
     menu.addSeparator();
-    menu.addItem(1, isLearning ? "Cancel MIDI Learn" : "MIDI Learn Bypass", true, isLearning);
-    menu.addItem(2, "Clear MIDI Binding", hasBinding, false);
+    menu.addItem(1, isLearning ? tr(dsp::TextKey::CancelMidiLearn) : tr(dsp::TextKey::MidiLearnBypass), true, isLearning);
+    menu.addItem(2, tr(dsp::TextKey::ClearMidiBinding), hasBinding, false);
 
     menu.showMenuAsync(
         juce::PopupMenu::Options().withTargetComponent(this),
@@ -420,7 +438,7 @@ HeaderBar::HeaderBar(HarmonizerVProcessor& proc)
         processor.getApvts(), params::key, keyCombo);
 
     for (int s = 0; s < static_cast<int>(dsp::ScaleType::NumScales); ++s)
-        scaleCombo.addItem(dsp::ScaleHarmonizer::getScaleName(s), s + 1);
+        scaleCombo.addItem(trScale(s), s + 1);
     addAndMakeVisible(scaleCombo);
     scaleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         processor.getApvts(), params::scale, scaleCombo);
@@ -434,6 +452,33 @@ HeaderBar::HeaderBar(HarmonizerVProcessor& proc)
     outKnob.attach(processor.getApvts(), params::outputGain);
     addAndMakeVisible(mixKnob);
     addAndMakeVisible(outKnob);
+
+    refreshLocalization();
+}
+
+void HeaderBar::refreshLocalization()
+{
+    enginePill.refreshLocalization();
+    harmonyModePill.refreshLocalization();
+    powerBypassBtn.refreshLocalization();
+
+    prevPresetBtn.setTooltip(tr(dsp::TextKey::PrevPresetTooltip));
+    nextPresetBtn.setTooltip(tr(dsp::TextKey::NextPresetTooltip));
+    savePresetBtn.setButtonText(tr(dsp::TextKey::SaveBtn));
+    savePresetBtn.setTooltip(tr(dsp::TextKey::SavePresetTooltip));
+
+    mixKnob.setTooltip(tr(dsp::TextKey::KnobMixTooltip));
+    outKnob.setTooltip(tr(dsp::TextKey::KnobOutTooltip));
+
+    for (int s = 0; s < static_cast<int>(dsp::ScaleType::NumScales); ++s)
+        scaleCombo.changeItemText(s + 1, trScale(s));
+
+    if (brandHover == BrandHover::LangChip)
+        setTooltip(tr(dsp::TextKey::LangTooltip));
+    else if (brandHover == BrandHover::Title || brandHover == BrandHover::AboutChip)
+        setTooltip(tr(dsp::TextKey::AboutTooltip));
+
+    repaint();
 }
 
 void HeaderBar::rebuildPresetMenu()
@@ -455,12 +500,12 @@ void HeaderBar::rebuildPresetMenu()
 
 void HeaderBar::openSavePresetDialog()
 {
-    auto* aw = new juce::AlertWindow("Save User Preset",
-                                     "Enter a name for your vocal harmony preset:",
+    auto* aw = new juce::AlertWindow(tr(dsp::TextKey::SaveDialogTitle),
+                                     tr(dsp::TextKey::SaveDialogMessage),
                                      juce::MessageBoxIconType::NoIcon);
-    aw->addTextEditor("presetName", "My Harmony");
-    aw->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
-    aw->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+    aw->addTextEditor("presetName", tr(dsp::TextKey::SaveDialogDefault));
+    aw->addButton(tr(dsp::TextKey::SaveBtn), 1, juce::KeyPress(juce::KeyPress::returnKey));
+    aw->addButton(tr(dsp::TextKey::CancelBtn), 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
     aw->enterModalState(true, juce::ModalCallbackFunction::create(
         [safeThis = juce::Component::SafePointer<HeaderBar>(this), aw](int result)
@@ -549,24 +594,29 @@ void HeaderBar::resized()
     enginePill.setBounds(r.removeFromRight(112).withSizeKeepingCentre(112, 42));
     r.removeFromRight(8);
 
-    // Left side bypass button + brand wordmark + presets
+    // Left side bypass button + brand wordmark + EN/ES + About + presets
     powerBypassBtn.setBounds(r.removeFromLeft(22).withSizeKeepingCentre(22, 22));
     r.removeFromLeft(4);
-    r.removeFromLeft(84); // Space for "HarmonizerV" wordmark
+    const auto brandCol = r.removeFromLeft(94).withSizeKeepingCentre(94, 42).toFloat();
+    brandTitleRect = brandCol.withHeight(22.0f);
+    const auto subRow = brandCol.withTrimmedTop(24.0f).withHeight(16.0f);
+    langChipRect = subRow.withWidth(44.0f);
+    aboutChipRect = subRow.withTrimmedLeft(48.0f);
+    r.removeFromLeft(4);
     prevPresetBtn.setBounds(r.removeFromLeft(20).withSizeKeepingCentre(20, 26));
     r.removeFromLeft(2);
 
-    const int fixedMiddleW = 84 + 6 + 50 + 4 + 38 + 20 + 2 + 4 + 8 + 8;
+    constexpr int fixedMiddleW = 229;
     const int flexAvail = std::max(170, r.getWidth() - fixedMiddleW);
-    const int presetWidth = std::clamp(flexAvail * 36 / 100, 86, 150);
-    const int scaleW      = std::clamp(flexAvail * 36 / 100, 82, 122);
-    const int noteW       = std::clamp(flexAvail - presetWidth - scaleW, 66, 98);
+    const int presetWidth = std::clamp(flexAvail * 34 / 100, 72, 150);
+    const int scaleW      = std::clamp(flexAvail * 33 / 100, 70, 122);
+    const int noteW       = std::clamp(flexAvail - presetWidth - scaleW, 64, 98);
 
     presetCombo.setBounds(r.removeFromLeft(presetWidth).withSizeKeepingCentre(presetWidth, 26));
     r.removeFromLeft(2);
     nextPresetBtn.setBounds(r.removeFromLeft(20).withSizeKeepingCentre(20, 26));
     r.removeFromLeft(3);
-    savePresetBtn.setBounds(r.removeFromLeft(38).withSizeKeepingCentre(38, 26));
+    savePresetBtn.setBounds(r.removeFromLeft(48).withSizeKeepingCentre(48, 26));
     r.removeFromLeft(8);
 
     // Center Harmony Mode / Key / Scale / Detected note pill
@@ -588,14 +638,57 @@ void HeaderBar::paint(juce::Graphics& g)
     g.setColour(Theme::borderSubtle);
     g.drawRoundedRectangle(bounds.reduced(0.5f), Theme::kCardRadius, 1.0f);
 
-    // Brand wordmark (power/bypass button sits to the left)
-    const auto brandRect = getLocalBounds().reduced(10, 8).withTrimmedLeft(26).withWidth(84);
-    g.setColour(latestSnap.bypassed ? Theme::textMuted : Theme::textPrimary);
-    g.setFont(Theme::makeFont(13.5f, true));
-    g.drawFittedText("HarmonizerV", brandRect, juce::Justification::centredLeft, 1);
+    const auto modeAccent = (latestSnap.activeMode == dsp::EngineMode::Live) ? Theme::liveAccent : Theme::studioAccent;
+
+    // Brand wordmark (clickable to open About)
+    const auto brandTextCol = latestSnap.bypassed
+        ? Theme::textMuted
+        : (brandHover == BrandHover::Title ? modeAccent : Theme::textPrimary);
+    g.setColour(brandTextCol);
+    g.setFont(Theme::makeFont(13.0f, true));
+    g.drawFittedText(appinfo::kAppName, brandTitleRect.toNearestInt(), juce::Justification::centredLeft, 1);
+
+    // EN | ES segmented language micro-pill
+    if (!langChipRect.isEmpty())
+    {
+        const bool isEs = (LocalizationManager::getInstance().getLanguage() == dsp::Language::Spanish);
+        const bool hovered = (brandHover == BrandHover::LangChip);
+
+        g.setColour(Theme::bgCanvas);
+        g.fillRoundedRectangle(langChipRect, 4.0f);
+        g.setColour(hovered ? modeAccent.withAlpha(0.75f) : Theme::borderSubtle);
+        g.drawRoundedRectangle(langChipRect.reduced(0.5f), 4.0f, 1.0f);
+
+        const float hw = langChipRect.getWidth() * 0.5f;
+        const auto enRect = langChipRect.withWidth(hw).reduced(1.5f);
+        const auto esRect = langChipRect.withTrimmedLeft(hw).reduced(1.5f);
+
+        g.setColour(modeAccent.withAlpha(0.88f));
+        g.fillRoundedRectangle(isEs ? esRect : enRect, 3.0f);
+
+        const auto activeTxtCol = (latestSnap.activeMode == dsp::EngineMode::Live) ? Theme::bgCanvas : Theme::textPrimary;
+        g.setFont(Theme::makeFont(8.8f, true));
+        g.setColour(!isEs ? activeTxtCol : Theme::textSecondary);
+        g.drawFittedText("EN", enRect.toNearestInt(), juce::Justification::centred, 1);
+        g.setColour(isEs ? activeTxtCol : Theme::textSecondary);
+        g.drawFittedText("ES", esRect.toNearestInt(), juce::Justification::centred, 1);
+    }
+
+    // About / Acerca micro-chip
+    if (!aboutChipRect.isEmpty())
+    {
+        const bool hovered = (brandHover == BrandHover::AboutChip);
+        g.setColour(hovered ? Theme::bgElevated.brighter(0.12f) : Theme::bgElevated);
+        g.fillRoundedRectangle(aboutChipRect, 4.0f);
+        g.setColour(hovered ? modeAccent.withAlpha(0.75f) : Theme::borderFocus);
+        g.drawRoundedRectangle(aboutChipRect.reduced(0.5f), 4.0f, 1.0f);
+
+        g.setColour(hovered ? Theme::textPrimary : Theme::textSecondary);
+        g.setFont(Theme::makeFont(9.0f, true));
+        g.drawFittedText(tr(dsp::TextKey::AboutBtn), aboutChipRect.toNearestInt(), juce::Justification::centred, 1);
+    }
 
     // Live detected pitch pill with intonation deviation strip
-    const auto modeAccent = (latestSnap.activeMode == dsp::EngineMode::Live) ? Theme::liveAccent : Theme::studioAccent;
     if (!notePillBounds.isEmpty())
     {
         const auto np = notePillBounds.toFloat();
@@ -673,6 +766,62 @@ void HeaderBar::paint(juce::Graphics& g)
         const float barW = (mf.getWidth() - 3.0f) * 0.5f;
         drawBar(meterLevelL, peakHoldL, mf.getX() + 1.0f, barW);
         drawBar(meterLevelR, peakHoldR, mf.getX() + 2.0f + barW, barW);
+    }
+}
+
+void HeaderBar::mouseMove(const juce::MouseEvent& e)
+{
+    BrandHover next = BrandHover::None;
+    if (langChipRect.contains(e.position))
+        next = BrandHover::LangChip;
+    else if (aboutChipRect.contains(e.position))
+        next = BrandHover::AboutChip;
+    else if (brandTitleRect.contains(e.position))
+        next = BrandHover::Title;
+
+    setMouseCursor(next != BrandHover::None ? juce::MouseCursor::PointingHandCursor
+                                            : juce::MouseCursor::NormalCursor);
+
+    if (next != brandHover)
+    {
+        brandHover = next;
+        if (brandHover == BrandHover::LangChip)
+            setTooltip(tr(dsp::TextKey::LangTooltip));
+        else if (brandHover == BrandHover::AboutChip || brandHover == BrandHover::Title)
+            setTooltip(tr(dsp::TextKey::AboutTooltip));
+        else
+            setTooltip({});
+        repaint();
+    }
+}
+
+void HeaderBar::mouseExit(const juce::MouseEvent&)
+{
+    setMouseCursor(juce::MouseCursor::NormalCursor);
+    if (brandHover != BrandHover::None)
+    {
+        brandHover = BrandHover::None;
+        setTooltip({});
+        repaint();
+    }
+}
+
+void HeaderBar::mouseDown(const juce::MouseEvent& e)
+{
+    if (langChipRect.contains(e.position))
+    {
+        const auto targetLang = (e.position.x >= langChipRect.getCentreX())
+            ? dsp::Language::Spanish
+            : dsp::Language::English;
+        LocalizationManager::getInstance().setLanguage(targetLang);
+        repaint();
+        return;
+    }
+
+    if (aboutChipRect.contains(e.position) || brandTitleRect.contains(e.position))
+    {
+        if (onAboutClicked)
+            onAboutClicked();
     }
 }
 
