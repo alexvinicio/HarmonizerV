@@ -9,6 +9,8 @@
 namespace harmonizer
 {
 
+class SnapshotManager;
+
 struct PresetEntry
 {
     juce::String name;
@@ -19,7 +21,7 @@ struct PresetEntry
 class PresetManager
 {
 public:
-    explicit PresetManager(juce::AudioProcessorValueTreeState& state);
+    PresetManager(juce::AudioProcessorValueTreeState& state, SnapshotManager& snapshots);
 
     void refreshPresets();
     const std::vector<PresetEntry>& getPresets() const noexcept { return presets; }
@@ -38,6 +40,7 @@ private:
     void setParamValue(const juce::String& id, float plainValue);
 
     juce::AudioProcessorValueTreeState& apvts;
+    SnapshotManager& snapshotManager;
     std::vector<PresetEntry> presets;
     int numFactoryPresets = 7;
     int currentIndex = 0;

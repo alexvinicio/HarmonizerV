@@ -18,18 +18,35 @@ EngineModePill::EngineModePill(juce::AudioProcessorValueTreeState& apvts)
 {
     if (auto* param = apvts.getParameter(params::engineMode))
     {
-        attachment = std::make_unique<juce::ParameterAttachment>(
+        modeAttachment = std::make_unique<juce::ParameterAttachment>(
             *param,
-            [this](float newValue) { handleParameterChanged(newValue); },
+            [this](float newValue) { handleModeChanged(newValue); },
             nullptr);
-        attachment->sendInitialUpdate();
+        modeAttachment->sendInitialUpdate();
     }
+
+    if (auto* bufParam = apvts.getParameter(params::liveBuffer))
+    {
+        liveBufferAttachment = std::make_unique<juce::ParameterAttachment>(
+            *bufParam,
+            [this](float newValue) { handleLiveBufferChanged(newValue); },
+            nullptr);
+        liveBufferAttachment->sendInitialUpdate();
+    }
+
     setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    setTooltip("LIVE / STUDIO engine · Click latency badge in LIVE mode to change DSP buffer (2.7–10.7 ms)");
 }
 
-void EngineModePill::handleParameterChanged(float newValue)
+void EngineModePill::handleModeChanged(float newValue)
 {
     currentMode = (newValue >= 0.5f) ? 1 : 0;
+    repaint();
+}
+
+void EngineModePill::handleLiveBufferChanged(float newValue)
+{
+    currentLiveBuffer = std::clamp(static_cast<int>(std::lround(newValue)), 0, 3);
     repaint();
 }
 
@@ -42,10 +59,27 @@ void EngineModePill::setLatencyText(const juce::String& text)
     }
 }
 
+void EngineModePill::openLiveBufferMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem(1, "Ultra · 2.7 ms (128 smp)", true, currentLiveBuffer == 0);
+    menu.addItem(2, "Fast · 5.3 ms (256 smp)",  true, currentLiveBuffer == 1);
+    menu.addItem(3, "Low · 8.0 ms (384 smp)",   true, currentLiveBuffer == 2);
+    menu.addItem(4, "Safe · 10.7 ms (512 smp)", true, currentLiveBuffer == 3);
+
+    menu.showMenuAsync(
+        juce::PopupMenu::Options().withTargetComponent(this),
+        [safeThis = juce::Component::SafePointer<EngineModePill>(this)](int selectedId)
+        {
+            if (safeThis != nullptr && selectedId >= 1 && selectedId <= 4 && safeThis->liveBufferAttachment != nullptr)
+                safeThis->liveBufferAttachment->setValueAsCompleteGesture(static_cast<float>(selectedId - 1));
+        });
+}
+
 void EngineModePill::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
-    auto pillArea = bounds.removeFromTop(26.0f);
+    auto pillArea = bounds.removeFromTop(24.0f);
 
     g.setColour(Theme::bgElevated);
     g.fillRoundedRectangle(pillArea, 7.0f);
@@ -74,18 +108,67 @@ void EngineModePill::paint(juce::Graphics& g)
     g.setColour(currentMode == 1 ? Theme::textPrimary : Theme::textSecondary);
     g.drawFittedText("STUDIO", studioRect.toNearestInt(), juce::Justification::centred, 1);
 
-    g.setFont(Theme::makeFont(10.0f));
-    g.setColour(currentMode == 0 ? Theme::liveAccent : Theme::studioAccent);
-    g.drawFittedText(latencyLabel, bounds.toNearestInt(), juce::Justification::centred, 1);
+    bounds.removeFromTop(2.0f);
+
+    if (currentMode == 0)
+    {
+        const auto chip = bounds.reduced(6.0f, 0.0f);
+        g.setColour(latencyHovered ? Theme::bgElevated.brighter(0.14f) : Theme::bgElevated);
+        g.fillRoundedRectangle(chip, 4.5f);
+        g.setColour(Theme::liveAccent.withAlpha(latencyHovered ? 0.80f : 0.35f));
+        g.drawRoundedRectangle(chip.reduced(0.5f), 4.5f, 1.0f);
+
+        g.setFont(Theme::makeFont(9.8f, true));
+        g.setColour(Theme::liveAccent);
+        g.drawFittedText(latencyLabel, chip.withTrimmedRight(12.0f).toNearestInt(), juce::Justification::centred, 1);
+
+        // Sharp downward triangle chevron
+        const float cx = chip.getRight() - 8.5f;
+        const float cy = chip.getCentreY();
+        juce::Path chevron;
+        chevron.addTriangle(cx - 2.6f, cy - 1.4f, cx + 2.6f, cy - 1.4f, cx, cy + 1.9f);
+        g.fillPath(chevron);
+    }
+    else
+    {
+        g.setFont(Theme::makeFont(10.0f));
+        g.setColour(Theme::studioAccent);
+        g.drawFittedText(latencyLabel, bounds.toNearestInt(), juce::Justification::centred, 1);
+    }
+}
+
+void EngineModePill::mouseMove(const juce::MouseEvent& e)
+{
+    const bool overChip = (currentMode == 0 && e.position.y >= 24.0f);
+    if (latencyHovered != overChip)
+    {
+        latencyHovered = overChip;
+        repaint();
+    }
+}
+
+void EngineModePill::mouseExit(const juce::MouseEvent&)
+{
+    if (latencyHovered)
+    {
+        latencyHovered = false;
+        repaint();
+    }
 }
 
 void EngineModePill::mouseDown(const juce::MouseEvent& e)
 {
-    if (attachment == nullptr)
+    if (currentMode == 0 && (e.position.y >= 24.0f || e.mods.isRightButtonDown()))
+    {
+        openLiveBufferMenu();
+        return;
+    }
+
+    if (modeAttachment == nullptr)
         return;
 
     const float target = (e.position.x < static_cast<float>(getWidth()) * 0.5f) ? 0.0f : 1.0f;
-    attachment->setValueAsCompleteGesture(target);
+    modeAttachment->setValueAsCompleteGesture(target);
 }
 
 // ============================================================================
@@ -279,7 +362,9 @@ void HeaderBar::updateTelemetry(const dsp::TelemetrySnapshot& snap)
 
     const double sr = std::max(8000.0, processor.getCurrentSampleRateSafe());
     const double latMs = static_cast<double>(snap.activeLatencySamples) * 1000.0 / sr;
-    enginePill.setLatencyText(juce::String(latMs, 1) + " ms PDC");
+    enginePill.setLatencyText(snap.activeMode == dsp::EngineMode::Live
+        ? juce::String(latMs, 1) + " ms"
+        : juce::String(latMs, 1) + " ms PDC");
 
     mixKnob.setAccentColour(snap.activeMode == dsp::EngineMode::Live ? Theme::liveAccent : Theme::studioAccent);
 
@@ -300,7 +385,7 @@ void HeaderBar::resized()
     r.removeFromRight(2);
     mixKnob.setBounds(r.removeFromRight(42));
     r.removeFromRight(8);
-    enginePill.setBounds(r.removeFromRight(110).withSizeKeepingCentre(110, 42));
+    enginePill.setBounds(r.removeFromRight(112).withSizeKeepingCentre(112, 42));
     r.removeFromRight(8);
 
     // Left side brand + presets
@@ -308,7 +393,7 @@ void HeaderBar::resized()
     prevPresetBtn.setBounds(r.removeFromLeft(20).withSizeKeepingCentre(20, 26));
     r.removeFromLeft(2);
 
-    const int fixedMiddleW = 84 + 6 + 50 + 4 + 38 + 20 + 2 + 4 + 8 + 6;
+    const int fixedMiddleW = 84 + 6 + 50 + 4 + 38 + 20 + 2 + 4 + 8 + 8;
     const int flexAvail = std::max(180, r.getWidth() - fixedMiddleW);
     const int presetWidth = std::clamp(flexAvail * 36 / 100, 96, 150);
     const int scaleW      = std::clamp(flexAvail * 36 / 100, 90, 122);

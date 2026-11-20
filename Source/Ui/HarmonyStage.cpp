@@ -14,6 +14,7 @@ HarmonyStage::HarmonyStage(HarmonizerVProcessor& proc)
     : processor(proc)
 {
     setMouseCursor(juce::MouseCursor::NormalCursor);
+    setTooltip("Drag orbs: Pan/Pitch · Wheel: Level · Snapshots A–D: Click recall, Shift+Click store, Right-Click copy/clear");
 }
 
 void HarmonyStage::setSelectedVoice(int voiceIndex)
@@ -138,6 +139,65 @@ void HarmonyStage::resized()
         pillRects[static_cast<size_t>(v)] = juce::Rectangle<float>(x, top.getY(), 54.0f, 24.0f);
         x += 60.0f;
     }
+
+    constexpr float kSnapW = 26.0f;
+    constexpr float kSnapGap = 4.0f;
+    constexpr float kTotalSnapsW = dsp::kNumSnapshots * kSnapW + (dsp::kNumSnapshots - 1) * kSnapGap; // 116 px
+    float sx = top.getRight() - kTotalSnapsW;
+    for (int s = 0; s < dsp::kNumSnapshots; ++s)
+    {
+        snapPillRects[static_cast<size_t>(s)] = juce::Rectangle<float>(sx, top.getY(), kSnapW, 24.0f);
+        sx += kSnapW + kSnapGap;
+    }
+
+    snapLabelRect = juce::Rectangle<float>(snapPillRects[0].getX() - 38.0f, top.getY(), 34.0f, 24.0f);
+    hintRect = juce::Rectangle<float>(pillRects[dsp::kExposedVoicesV1 - 1].getRight() + 8.0f,
+                                      top.getY(),
+                                      std::max(0.0f, snapLabelRect.getX() - pillRects[dsp::kExposedVoicesV1 - 1].getRight() - 16.0f),
+                                      24.0f);
+}
+
+void HarmonyStage::showSnapshotContextMenu(int slotIndex)
+{
+    static constexpr std::array<const char*, 4> kLetters = { "A", "B", "C", "D" };
+    if (slotIndex < 0 || slotIndex >= dsp::kNumSnapshots)
+        return;
+
+    const auto& snapMgr = processor.getSnapshotManager();
+    const int activeIdx = snapMgr.getActiveSnapshotIndex();
+    const juce::String targetLetter = kLetters[static_cast<size_t>(slotIndex)];
+
+    juce::PopupMenu menu;
+    menu.addItem(1, "Store Current into " + targetLetter);
+    menu.addSeparator();
+
+    for (int other = 0; other < dsp::kNumSnapshots; ++other)
+    {
+        if (other != slotIndex && snapMgr.isSnapshotPopulated(other))
+            menu.addItem(10 + other, "Copy from " + juce::String(kLetters[static_cast<size_t>(other)]));
+    }
+
+    menu.addSeparator();
+    const bool canClear = snapMgr.isSnapshotPopulated(slotIndex) && (slotIndex != activeIdx);
+    menu.addItem(20, "Clear " + targetLetter, canClear, false);
+
+    menu.showMenuAsync(
+        juce::PopupMenu::Options().withTargetScreenArea(localAreaToGlobal(snapPillRects[static_cast<size_t>(slotIndex)].toNearestInt())),
+        [safeThis = juce::Component::SafePointer<HarmonyStage>(this), slotIndex](int selectedId)
+        {
+            if (safeThis == nullptr || selectedId <= 0)
+                return;
+
+            auto& mgr = safeThis->processor.getSnapshotManager();
+            if (selectedId == 1)
+                mgr.storeSnapshot(slotIndex);
+            else if (selectedId >= 10 && selectedId < 10 + dsp::kNumSnapshots)
+                mgr.copySnapshot(selectedId - 10, slotIndex);
+            else if (selectedId == 20)
+                mgr.clearSnapshot(slotIndex);
+
+            safeThis->repaint();
+        });
 }
 
 void HarmonyStage::paint(juce::Graphics& g)
@@ -197,15 +257,70 @@ void HarmonyStage::paint(juce::Graphics& g)
                          juce::Justification::centredLeft, 1);
     }
 
-    // Subtle hint top-right
-    g.setColour(isMidiMode ? Theme::getVoiceColour(0).withAlpha(0.85f) : Theme::textMuted);
-    g.setFont(Theme::makeFont(10.5f, isMidiMode));
-    const juce::String hintText = isMidiMode
-        ? "MIDI MODE  ·  Play Chords on MIDI Keyboard / Track  ·  Drag X: Pan  ·  Wheel: Level"
-        : "Drag: Pan / Pitch  ·  Wheel: Level  ·  Double-Click: On/Off";
-    g.drawFittedText(hintText,
-                     getLocalBounds().reduced(16, 12).removeFromTop(22),
-                     juce::Justification::centredRight, 1);
+    // Snapshot Scene Pills (A / B / C / D) top-right
+    const auto& snapMgr = processor.getSnapshotManager();
+    const int activeSnap = snapMgr.getActiveSnapshotIndex();
+    const auto modeAccent = (latestSnap.activeMode == dsp::EngineMode::Live) ? Theme::liveAccent : Theme::studioAccent;
+
+    g.setColour(Theme::textMuted);
+    g.setFont(Theme::makeFont(9.5f, true));
+    g.drawFittedText("SNAP", snapLabelRect.toNearestInt(), juce::Justification::centredRight, 1);
+
+    static constexpr std::array<const char*, 4> kSnapLetters = { "A", "B", "C", "D" };
+    for (int s = 0; s < dsp::kNumSnapshots; ++s)
+    {
+        const auto sr = snapPillRects[static_cast<size_t>(s)];
+        const bool isActive = (s == activeSnap);
+        const bool isPopulated = snapMgr.isSnapshotPopulated(s);
+
+        if (isActive)
+        {
+            g.setColour(modeAccent);
+            g.fillRoundedRectangle(sr, 5.5f);
+            g.setColour(latestSnap.activeMode == dsp::EngineMode::Live ? Theme::bgCanvas : Theme::textPrimary);
+            g.setFont(Theme::makeFont(11.0f, true));
+        }
+        else if (isPopulated)
+        {
+            g.setColour(Theme::bgElevated);
+            g.fillRoundedRectangle(sr, 5.5f);
+            g.setColour(Theme::borderFocus);
+            g.drawRoundedRectangle(sr.reduced(0.5f), 5.5f, 1.0f);
+
+            g.setColour(modeAccent.withAlpha(0.75f));
+            g.fillEllipse(sr.getCentreX() - 1.5f, sr.getBottom() - 4.5f, 3.0f, 3.0f);
+
+            g.setColour(Theme::textPrimary);
+            g.setFont(Theme::makeFont(11.0f, true));
+        }
+        else
+        {
+            g.setColour(Theme::bgCanvas.withAlpha(0.75f));
+            g.fillRoundedRectangle(sr, 5.5f);
+            g.setColour(Theme::borderSubtle);
+            g.drawRoundedRectangle(sr.reduced(0.5f), 5.5f, 1.0f);
+
+            g.setColour(Theme::textMuted);
+            g.setFont(Theme::makeFont(11.0f, false));
+        }
+
+        g.drawFittedText(kSnapLetters[static_cast<size_t>(s)],
+                         sr.toNearestInt(),
+                         juce::Justification::centred, 1);
+    }
+
+    // Subtle hint centered cleanly between voice pills and snapshot pills
+    if (hintRect.getWidth() >= 140.0f)
+    {
+        g.setColour(isMidiMode ? Theme::getVoiceColour(0).withAlpha(0.85f) : Theme::textMuted);
+        g.setFont(Theme::makeFont(10.0f, isMidiMode));
+        const juce::String hintText = isMidiMode
+            ? "MIDI · Play Chords · Drag X: Pan · Wheel: Level"
+            : "Drag: Pan / Pitch · Wheel: Level · Dbl-Click: On/Off";
+        g.drawFittedText(hintText,
+                         hintRect.toNearestInt(),
+                         juce::Justification::centred, 1);
+    }
 
     // Horizontal pitch guide lines
     static constexpr std::array<int, 9> kGridSteps = { -14, -7, -4, -2, 0, 2, 4, 7, 14 };
@@ -371,6 +486,23 @@ void HarmonyStage::mouseDown(const juce::MouseEvent& e)
         }
     }
 
+    // Check top snapshot pills (A / B / C / D)
+    for (int s = 0; s < dsp::kNumSnapshots; ++s)
+    {
+        if (snapPillRects[static_cast<size_t>(s)].contains(e.position))
+        {
+            if (e.mods.isRightButtonDown())
+                showSnapshotContextMenu(s);
+            else if (e.mods.isShiftDown())
+                processor.getSnapshotManager().storeSnapshot(s);
+            else
+                processor.getSnapshotManager().selectSnapshot(s);
+
+            repaint();
+            return;
+        }
+    }
+
     const int hit = hitTestOrb(e.position);
     if (hit >= 0)
     {
@@ -423,6 +555,12 @@ void HarmonyStage::mouseDoubleClick(const juce::MouseEvent& e)
             repaint();
             return;
         }
+    }
+
+    for (int s = 0; s < dsp::kNumSnapshots; ++s)
+    {
+        if (snapPillRects[static_cast<size_t>(s)].contains(e.position))
+            return;
     }
 
     const int hit = hitTestOrb(e.position);

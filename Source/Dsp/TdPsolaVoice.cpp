@@ -6,11 +6,11 @@
 namespace harmonizer::dsp
 {
 
-void TdPsolaVoice::prepare(double sampleRate, int voiceIdx)
+void TdPsolaVoice::prepare(double sampleRate, int voiceIdx, LiveBufferSize bufSize)
 {
     fs = std::max(8000.0, sampleRate);
     voiceIndex = voiceIdx;
-    liveLatencySamples = computeLiveLatencySamples(fs);
+    liveLatencySamples = computeLiveLatencySamples(fs, bufSize);
 
     formantSmoothAlpha = 1.0 - std::exp(-1.0 / (0.014 * fs));
     lastGlideMs = 28.0;
@@ -157,7 +157,7 @@ float TdPsolaVoice::processSample(const PitchMarkDetector& markDetector,
     const double tOut = std::clamp(t0 / pitchRatio, 12.0, fs / 30.0);
     const double formantMargin = std::max(1.0, smoothedFormantRatio);
     const double maxSafeHalfW = static_cast<double>(liveLatencySamples) * 0.92 / std::max(1.0, formantMargin - 0.10);
-    const double halfWidth = std::clamp(t0 * 1.05, 16.0, std::max(64.0, maxSafeHalfW));
+    const double halfWidth = std::clamp(t0 * 1.05, 16.0, std::max(32.0, maxSafeHalfW));
 
     if (!synthInitialized)
     {
@@ -168,7 +168,7 @@ float TdPsolaVoice::processSample(const PitchMarkDetector& markDetector,
     if (nextSynthCenter < static_cast<double>(currentSampleIndex) - halfWidth)
         nextSynthCenter = static_cast<double>(currentSampleIndex);
 
-    const double maxAllowedMark = static_cast<double>(std::max<int64_t>(0, currentSampleIndex - 8));
+    const double maxAllowedMark = static_cast<double>(std::max<int64_t>(0, currentSampleIndex - 12));
 
     while (nextSynthCenter - halfWidth <= static_cast<double>(currentSampleIndex))
     {

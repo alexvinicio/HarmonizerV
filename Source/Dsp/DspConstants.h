@@ -29,6 +29,14 @@ enum class HarmonyMode : int
     Midi = 1
 };
 
+enum class LiveBufferSize : int
+{
+    Ultra128 = 0, // ~2.7 ms @ 48 kHz (128 samples)
+    Fast256  = 1, // ~5.3 ms @ 48 kHz (256 samples)
+    Low384   = 2, // ~8.0 ms @ 48 kHz (384 samples)
+    Safe512  = 3  // ~10.7 ms @ 48 kHz (512 samples)
+};
+
 struct VoiceParams
 {
     bool enabled = false;
@@ -50,6 +58,7 @@ struct GlobalParams
     int scaleIndex = 0;          // 0..8
     EngineMode engineMode = EngineMode::Live;
     HarmonyMode harmonyMode = HarmonyMode::Auto;
+    LiveBufferSize liveBufferSize = LiveBufferSize::Fast256;
     float mix = 0.45f;           // 0..1
     float outputGainDb = 0.0f;   // -24..+12 dB
     float humanize = 0.20f;      // 0..1
@@ -140,10 +149,19 @@ inline float softCeiling(float x) noexcept
     return sign * (0.80f + 0.18f * std::tanh((a - 0.80f) / 0.18f));
 }
 
-inline int computeLiveLatencySamples(double sampleRate) noexcept
+inline int computeLiveLatencySamples(double sampleRate, LiveBufferSize bufSize = LiveBufferSize::Fast256) noexcept
 {
     const double sr = std::max(8000.0, sampleRate);
-    return std::max(128, static_cast<int>(std::llround(sr * (512.0 / 48000.0))));
+    double baseAt48k = 256.0;
+    switch (bufSize)
+    {
+        case LiveBufferSize::Ultra128: baseAt48k = 128.0; break;
+        case LiveBufferSize::Fast256:  baseAt48k = 256.0; break;
+        case LiveBufferSize::Low384:   baseAt48k = 384.0; break;
+        case LiveBufferSize::Safe512:  baseAt48k = 512.0; break;
+        default:                       baseAt48k = 256.0; break;
+    }
+    return std::max(64, static_cast<int>(std::llround(sr * (baseAt48k / 48000.0))));
 }
 
 } // namespace harmonizer::dsp

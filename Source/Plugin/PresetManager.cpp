@@ -1,5 +1,6 @@
 #include "Plugin/PresetManager.h"
 #include "Plugin/ParameterIds.h"
+#include "Plugin/SnapshotManager.h"
 
 namespace harmonizer
 {
@@ -99,8 +100,9 @@ constexpr std::array<FactoryPresetSpec, 7> kFactoryPresets = {{
 }};
 } // namespace
 
-PresetManager::PresetManager(juce::AudioProcessorValueTreeState& state)
-    : apvts(state)
+PresetManager::PresetManager(juce::AudioProcessorValueTreeState& state, SnapshotManager& snapshots)
+    : apvts(state),
+      snapshotManager(snapshots)
 {
     numFactoryPresets = static_cast<int>(kFactoryPresets.size());
     refreshPresets();
@@ -192,7 +194,16 @@ void PresetManager::loadPreset(int index)
         {
             auto tree = juce::ValueTree::fromXml(*xml);
             if (tree.isValid() && tree.hasType(apvts.state.getType()))
+            {
+                auto snapshotsNode = tree.getChildWithName("SNAPSHOTS");
+                if (snapshotsNode.isValid())
+                    tree.removeChild(snapshotsNode, nullptr);
+
+                snapshotManager.beginExternalStateLoad();
                 apvts.replaceState(tree);
+                snapshotManager.loadFromStateTree(snapshotsNode);
+                snapshotManager.endExternalStateLoad();
+            }
         }
     }
 }
@@ -205,6 +216,7 @@ bool PresetManager::saveUserPreset(const juce::String& name)
 
     const auto file = getUserPresetDirectory().getChildFile(sanitized + ".xml");
     auto stateCopy = apvts.copyState();
+    snapshotManager.writeToStateTree(stateCopy);
     std::unique_ptr<juce::XmlElement> xml(stateCopy.createXml());
     if (xml == nullptr || !xml->writeTo(file))
         return false;

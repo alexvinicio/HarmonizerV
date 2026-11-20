@@ -34,12 +34,15 @@ HarmonizerVProcessor::HarmonizerVProcessor()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "HarmonizerVState", createParameterLayout()),
-      presetManager(apvts)
+      snapshotManager(apvts),
+      presetManager(apvts, snapshotManager)
 {
     keyParam         = apvts.getRawParameterValue(params::key);
     scaleParam       = apvts.getRawParameterValue(params::scale);
     engineModeParam  = apvts.getRawParameterValue(params::engineMode);
+    liveBufferParam  = apvts.getRawParameterValue(params::liveBuffer);
     harmonyModeParam = apvts.getRawParameterValue(params::harmonyMode);
+    snapshotParam    = apvts.getRawParameterValue(params::snapshot);
     mixParam         = apvts.getRawParameterValue(params::mix);
     outputGainParam  = apvts.getRawParameterValue(params::outputGain);
     humanizeParam    = apvts.getRawParameterValue(params::humanize);
@@ -90,9 +93,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout HarmonizerVProcessor::create
     p.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ params::engineMode, 1 }, "Engine Mode", engineChoices, 0));
 
+    juce::StringArray liveBufChoices{ "2.7 ms (128)", "5.3 ms (256)", "8.0 ms (384)", "10.7 ms (512)" };
+    p.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ params::liveBuffer, 1 }, "Live Buffer", liveBufChoices, 1));
+
     juce::StringArray harmonyChoices{ "Auto", "MIDI" };
     p.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ params::harmonyMode, 1 }, "Harmony Mode", harmonyChoices, 0));
+
+    juce::StringArray snapshotChoices{ "A", "B", "C", "D" };
+    p.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ params::snapshot, 1 }, "Snapshot", snapshotChoices, 0));
 
     p.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ params::mix, 1 }, "Mix",
@@ -219,7 +230,8 @@ bool HarmonizerVProcessor::isBusesLayoutSupported(const BusesLayout& layouts) co
 void HarmonizerVProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     currentSampleRate.store(sampleRate, std::memory_order_relaxed);
-    engine.prepare(sampleRate, std::max(64, samplesPerBlock));
+    const int liveBufIdx = std::clamp(static_cast<int>(std::lround(liveBufferParam->load(std::memory_order_relaxed))), 0, 3);
+    engine.prepare(sampleRate, std::max(64, samplesPerBlock), static_cast<dsp::LiveBufferSize>(liveBufIdx));
     int dummy = 0;
     engine.consumeLatencyChanged(dummy);
     setLatencySamples(engine.getActiveLatencySamples());
@@ -273,6 +285,8 @@ void HarmonizerVProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     gp.engineMode      = (engineModeParam->load(std::memory_order_relaxed) >= 0.5f)
                            ? dsp::EngineMode::Studio
                            : dsp::EngineMode::Live;
+    const int liveBufIdx = std::clamp(static_cast<int>(std::lround(liveBufferParam->load(std::memory_order_relaxed))), 0, 3);
+    gp.liveBufferSize  = static_cast<dsp::LiveBufferSize>(liveBufIdx);
     gp.harmonyMode     = (harmonyModeParam->load(std::memory_order_relaxed) >= 0.5f)
                            ? dsp::HarmonyMode::Midi
                            : dsp::HarmonyMode::Auto;
@@ -350,6 +364,7 @@ const juce::String HarmonizerVProcessor::getProgramName(int index)
 void HarmonizerVProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    snapshotManager.writeToStateTree(state);
     std::unique_ptr<juce::XmlElement> xml(state.createXml());
     if (xml != nullptr)
         copyXmlToBinary(*xml, destData);
@@ -359,7 +374,20 @@ void HarmonizerVProcessor::setStateInformation(const void* data, int sizeInBytes
 {
     std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
     if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType()))
-        apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+    {
+        auto tree = juce::ValueTree::fromXml(*xmlState);
+        if (tree.isValid() && tree.hasType(apvts.state.getType()))
+        {
+            auto snapshotsNode = tree.getChildWithName("SNAPSHOTS");
+            if (snapshotsNode.isValid())
+                tree.removeChild(snapshotsNode, nullptr);
+
+            snapshotManager.beginExternalStateLoad();
+            apvts.replaceState(tree);
+            snapshotManager.loadFromStateTree(snapshotsNode);
+            snapshotManager.endExternalStateLoad();
+        }
+    }
 }
 
 juce::AudioProcessorEditor* HarmonizerVProcessor::createEditor()

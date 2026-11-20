@@ -10,7 +10,8 @@
 namespace harmonizer::ui
 {
 
-class HarmonyStage final : public juce::Component
+class HarmonyStage final : public juce::Component,
+                           public juce::SettableTooltipClient
 {
 public:
     explicit HarmonyStage(HarmonizerVProcessor& proc);
@@ -44,6 +45,7 @@ private:
     void endDragVoice();
     float getParamPlain(const juce::String& id, float fallback = 0.0f) const noexcept;
     void setParamPlain(const juce::String& id, float plainVal, bool notifyGesture);
+    void showSnapshotContextMenu(int slotIndex);
 
     HarmonizerVProcessor& processor;
     dsp::TelemetrySnapshot latestSnap{};
@@ -53,6 +55,9 @@ private:
     bool gestureActive = false;
 
     std::array<juce::Rectangle<float>, dsp::kExposedVoicesV1> pillRects{};
+    std::array<juce::Rectangle<float>, dsp::kNumSnapshots> snapPillRects{};
+    juce::Rectangle<float> snapLabelRect{};
+    juce::Rectangle<float> hintRect{};
 };
 
 } // namespace harmonizer::ui

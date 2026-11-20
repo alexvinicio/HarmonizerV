@@ -12,9 +12,10 @@ namespace harmonizer::dsp
 class TdPsolaVoice
 {
 public:
-    void prepare(double sampleRate, int voiceIdx = 0);
+    void prepare(double sampleRate, int voiceIdx = 0, LiveBufferSize bufSize = LiveBufferSize::Fast256);
     void reset() noexcept;
 
+    void setLatencySamples(int newLatencySamples) noexcept { liveLatencySamples = std::max(64, newLatencySamples); }
     int getLatencySamples() const noexcept { return liveLatencySamples; }
 
     float processSample(const PitchMarkDetector& markDetector,
@@ -50,7 +51,7 @@ private:
 
     double fs = 48000.0;
     int voiceIndex = 0;
-    int liveLatencySamples = 512;
+    int liveLatencySamples = 256;
 
     double nextSynthCenter = 0.0;
     bool synthInitialized = false;

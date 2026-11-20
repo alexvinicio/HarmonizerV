@@ -21,7 +21,7 @@ namespace harmonizer::dsp
 class HarmonizerEngine
 {
 public:
-    void prepare(double sampleRate, int maxBlockSize);
+    void prepare(double sampleRate, int maxBlockSize, LiveBufferSize initialLiveBuffer = LiveBufferSize::Fast256);
     void reset() noexcept;
 
     void handleNoteOn(int midiNote, float velocity) noexcept { midiController.noteOn(midiNote, velocity); }
@@ -42,6 +42,7 @@ public:
     int getLiveLatencySamples() const noexcept { return liveLatencySamples; }
     int getStudioLatencySamples() const noexcept { return studioLatencySamples; }
     EngineMode getActiveMode() const noexcept { return activeMode; }
+    LiveBufferSize getActiveLiveBufferSize() const noexcept { return activeLiveBuffer; }
 
     bool consumeLatencyChanged(int& outNewLatencySamples) noexcept;
     TelemetrySnapshot getTelemetry() const noexcept;
@@ -90,12 +91,14 @@ private:
     std::vector<float> wetBusL;
     std::vector<float> wetBusR;
 
-    int liveLatencySamples = 512;
+    int liveLatencySamples = 256;
     int studioLatencySamples = 2048;
-    int activeLatencySamples = 512;
+    int activeLatencySamples = 256;
 
     EngineMode activeMode = EngineMode::Live;
     EngineMode pendingMode = EngineMode::Live;
+    LiveBufferSize activeLiveBuffer = LiveBufferSize::Fast256;
+    LiveBufferSize pendingLiveBuffer = LiveBufferSize::Fast256;
     SwitchState switchState = SwitchState::Stable;
     int fadeLengthSamples = 720;
     int fadePos = 0;
@@ -110,7 +113,7 @@ private:
     bool prepared = false;
 
     std::atomic<bool> latencyChanged{ false };
-    std::atomic<int> reportedLatency{ 512 };
+    std::atomic<int> reportedLatency{ 256 };
 
     struct AtomicTelemetry
     {
@@ -122,7 +125,7 @@ private:
         std::atomic<float> detectedMidi{ 60.0f };
         std::atomic<float> voicedClarity{ 0.0f };
         std::atomic<bool> isVoiced{ false };
-        std::atomic<int> activeLatencySamples{ 512 };
+        std::atomic<int> activeLatencySamples{ 256 };
         std::atomic<int> activeMode{ 0 };
         std::atomic<int> activeHarmonyMode{ 0 };
         std::atomic<float> inputTuneCorrectionCents{ 0.0f };

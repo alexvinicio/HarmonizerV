@@ -11,21 +11,29 @@
 namespace harmonizer::ui
 {
 
-class EngineModePill final : public juce::Component
+class EngineModePill final : public juce::Component,
+                             public juce::SettableTooltipClient
 {
 public:
     explicit EngineModePill(juce::AudioProcessorValueTreeState& apvts);
 
     void setLatencyText(const juce::String& text);
     void paint(juce::Graphics& g) override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
     void mouseDown(const juce::MouseEvent& e) override;
 
 private:
-    void handleParameterChanged(float newValue);
+    void handleModeChanged(float newValue);
+    void handleLiveBufferChanged(float newValue);
+    void openLiveBufferMenu();
 
-    std::unique_ptr<juce::ParameterAttachment> attachment;
-    int currentMode = 0; // 0 = Live, 1 = Studio
-    juce::String latencyLabel{ "10.7 ms" };
+    std::unique_ptr<juce::ParameterAttachment> modeAttachment;
+    std::unique_ptr<juce::ParameterAttachment> liveBufferAttachment;
+    int currentMode = 0;       // 0 = Live, 1 = Studio
+    int currentLiveBuffer = 1; // 0 = 128, 1 = 256, 2 = 384, 3 = 512
+    bool latencyHovered = false;
+    juce::String latencyLabel{ "5.3 ms" };
 };
 
 class HarmonyModePill final : public juce::Component

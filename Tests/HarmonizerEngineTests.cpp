@@ -640,3 +640,104 @@ TEST_CASE("MidiHarmonyController and HarmonizerEngine MIDI mode allocate and har
         REQUIRE(snap.voiceMidiNote[1] == 67);
     }
 }
+
+TEST_CASE("HarmonizerEngine hot switches across all LIVE buffer sizes with exact latency alignment and no clicks", "[HarmonizerEngine][LiveBuffer]")
+{
+    const double sr = 48000.0;
+    const int bs = 128;
+
+    HarmonizerEngine engine;
+    engine.prepare(sr, bs, LiveBufferSize::Safe512);
+    REQUIRE(engine.getActiveLatencySamples() == 512);
+
+    GlobalParams gp;
+    gp.engineMode = EngineMode::Live;
+    gp.liveBufferSize = LiveBufferSize::Safe512;
+    gp.mix = 0.5f;
+    const auto vp = makeFourActiveVoices();
+
+    const LiveBufferSize sequence[] = {
+        LiveBufferSize::Fast256,
+        LiveBufferSize::Ultra128,
+        LiveBufferSize::Low384,
+        LiveBufferSize::Safe512
+    };
+    const int expectedLatencies[] = { 256, 128, 384, 512 };
+
+    std::vector<float> in(bs, 0.0f), outL(bs, 0.0f), outR(bs, 0.0f);
+    float prevOutL = 0.0f;
+    float maxDelta = 0.0f;
+    int sampleCursor = 0;
+
+    for (size_t step = 0; step < 4; ++step)
+    {
+        gp.liveBufferSize = sequence[step];
+        for (int blk = 0; blk < 20; ++blk)
+        {
+            for (int i = 0; i < bs; ++i)
+            {
+                const double t = static_cast<double>(sampleCursor++) / sr;
+                in[static_cast<size_t>(i)] = 0.22f * static_cast<float>(std::sin(kTwoPi * 220.0 * t));
+            }
+            const float* inPtr[1] = { in.data() };
+            float* outPtr[2] = { outL.data(), outR.data() };
+            engine.processBlock(inPtr, 1, outPtr, 2, bs, gp, vp);
+
+            for (int i = 0; i < bs; ++i)
+            {
+                REQUIRE(std::isfinite(outL[static_cast<size_t>(i)]));
+                REQUIRE(std::isfinite(outR[static_cast<size_t>(i)]));
+                if (step > 0 || blk > 2)
+                    maxDelta = std::max(maxDelta, std::abs(outL[static_cast<size_t>(i)] - prevOutL));
+                prevOutL = outL[static_cast<size_t>(i)];
+            }
+        }
+
+        int newLat = 0;
+        REQUIRE(engine.consumeLatencyChanged(newLat));
+        REQUIRE(newLat == expectedLatencies[step]);
+        REQUIRE(engine.getActiveLatencySamples() == expectedLatencies[step]);
+        REQUIRE(engine.getActiveLiveBufferSize() == sequence[step]);
+    }
+
+    REQUIRE(maxDelta < 0.45f);
+
+    for (size_t i = 0; i < 4; ++i)
+    {
+        HarmonizerEngine dryEngine;
+        dryEngine.prepare(sr, bs, sequence[i]);
+        REQUIRE(dryEngine.getActiveLatencySamples() == expectedLatencies[i]);
+
+        GlobalParams dryGp;
+        dryGp.engineMode = EngineMode::Live;
+        dryGp.liveBufferSize = sequence[i];
+        dryGp.mix = 0.0f;
+        std::array<VoiceParams, kMaxVoices> emptyVp{};
+
+        const int total = expectedLatencies[i] + 512;
+        std::vector<float> dryIn(static_cast<size_t>(total), 0.0f);
+        std::vector<float> dryOut(static_cast<size_t>(total), 0.0f);
+        dryIn[0] = 0.5f;
+
+        for (int off = 0; off < total; off += bs)
+        {
+            const int chunk = std::min(bs, total - off);
+            const float* inPtr[1] = { dryIn.data() + off };
+            float* outPtr[1] = { dryOut.data() + off };
+            dryEngine.processBlock(inPtr, 1, outPtr, 1, chunk, dryGp, emptyVp);
+        }
+
+        int peakIdx = -1;
+        float peakVal = 0.0f;
+        for (int n = 0; n < total; ++n)
+        {
+            if (std::abs(dryOut[static_cast<size_t>(n)]) > peakVal)
+            {
+                peakVal = std::abs(dryOut[static_cast<size_t>(n)]);
+                peakIdx = n;
+            }
+        }
+        REQUIRE(peakVal == Catch::Approx(0.5f).margin(0.01f));
+        REQUIRE(peakIdx == expectedLatencies[i]);
+    }
+}

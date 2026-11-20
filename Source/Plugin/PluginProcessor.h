@@ -2,6 +2,7 @@
 
 #include "Dsp/HarmonizerEngine.h"
 #include "Plugin/PresetManager.h"
+#include "Plugin/SnapshotManager.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <array>
@@ -44,6 +45,7 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState& getApvts() noexcept { return apvts; }
+    SnapshotManager& getSnapshotManager() noexcept { return snapshotManager; }
     PresetManager& getPresetManager() noexcept { return presetManager; }
     dsp::TelemetrySnapshot getTelemetry() const noexcept { return engine.getTelemetry(); }
     int getLiveLatencySamples() const noexcept { return engine.getLiveLatencySamples(); }
@@ -71,13 +73,16 @@ private:
     };
 
     juce::AudioProcessorValueTreeState apvts;
+    SnapshotManager snapshotManager;
     PresetManager presetManager;
     dsp::HarmonizerEngine engine;
 
     std::atomic<float>* keyParam = nullptr;
     std::atomic<float>* scaleParam = nullptr;
     std::atomic<float>* engineModeParam = nullptr;
+    std::atomic<float>* liveBufferParam = nullptr;
     std::atomic<float>* harmonyModeParam = nullptr;
+    std::atomic<float>* snapshotParam = nullptr;
     std::atomic<float>* mixParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
     std::atomic<float>* humanizeParam = nullptr;

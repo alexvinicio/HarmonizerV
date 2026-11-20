@@ -6,33 +6,35 @@
 namespace harmonizer::dsp
 {
 
-void HarmonizerEngine::prepare(double sampleRate, int maxBlockSize)
+void HarmonizerEngine::prepare(double sampleRate, int maxBlockSize, LiveBufferSize initialLiveBuffer)
 {
     fs = std::max(8000.0, sampleRate);
     maxChunkSize = std::max(64, maxBlockSize);
+    activeLiveBuffer = initialLiveBuffer;
+    pendingLiveBuffer = initialLiveBuffer;
 
     pitchTracker.prepare(fs);
     scaleHarmonizer.reset();
     pitchMarkDetector.prepare(fs);
     midiController.prepare(fs, kExposedVoicesV1);
 
-    inputTunerLive.prepare(fs, kMaxVoices);
+    inputTunerLive.prepare(fs, kMaxVoices, initialLiveBuffer);
     inputTunerStudio.prepare(fs, maxChunkSize);
 
     for (int v = 0; v < kMaxVoices; ++v)
     {
-        liveVoices[static_cast<size_t>(v)].prepare(fs, v);
+        liveVoices[static_cast<size_t>(v)].prepare(fs, v, initialLiveBuffer);
         studioVoices[static_cast<size_t>(v)].prepare(fs, maxChunkSize);
         channelStrips[static_cast<size_t>(v)].prepare(fs, v);
         voiceTailRemaining[static_cast<size_t>(v)] = 0;
     }
     harmonyBusFx.prepare(fs);
 
-    liveLatencySamples = liveVoices[0].getLatencySamples();
+    liveLatencySamples = computeLiveLatencySamples(fs, activeLiveBuffer);
     studioLatencySamples = studioVoices[0].getLatencySamples();
     activeLatencySamples = (activeMode == EngineMode::Live) ? liveLatencySamples : studioLatencySamples;
 
-    const int maxLat = std::max(liveLatencySamples, studioLatencySamples);
+    const int maxLat = std::max(computeLiveLatencySamples(fs, LiveBufferSize::Safe512), studioLatencySamples);
     dryDelayL.prepare(maxLat + maxChunkSize + 256);
     dryDelayR.prepare(maxLat + maxChunkSize + 256);
 
@@ -162,11 +164,26 @@ void HarmonizerEngine::processBlock(const float* const* inChannels,
     {
         const int chunk = std::min(maxChunkSize, numSamples - offset);
 
-        if (switchState == SwitchState::Stable && globalParams.engineMode != activeMode)
+        if (switchState == SwitchState::Stable)
         {
-            pendingMode = globalParams.engineMode;
-            switchState = SwitchState::FadingOut;
-            fadePos = 0;
+            if (activeMode == EngineMode::Studio && globalParams.engineMode == EngineMode::Studio
+                && globalParams.liveBufferSize != activeLiveBuffer)
+            {
+                activeLiveBuffer = globalParams.liveBufferSize;
+                pendingLiveBuffer = globalParams.liveBufferSize;
+                liveLatencySamples = computeLiveLatencySamples(fs, activeLiveBuffer);
+                inputTunerLive.setLatencySamples(liveLatencySamples);
+                for (int v = 0; v < kMaxVoices; ++v)
+                    liveVoices[static_cast<size_t>(v)].setLatencySamples(liveLatencySamples);
+            }
+            else if (globalParams.engineMode != activeMode
+                     || (activeMode == EngineMode::Live && globalParams.liveBufferSize != activeLiveBuffer))
+            {
+                pendingMode = globalParams.engineMode;
+                pendingLiveBuffer = globalParams.liveBufferSize;
+                switchState = SwitchState::FadingOut;
+                fadePos = 0;
+            }
         }
 
         int subLen = chunk;
@@ -183,6 +200,12 @@ void HarmonizerEngine::processBlock(const float* const* inChannels,
         if (switchState == SwitchState::FadingOut && fadePos >= fadeLengthSamples)
         {
             activeMode = pendingMode;
+            activeLiveBuffer = pendingLiveBuffer;
+            liveLatencySamples = computeLiveLatencySamples(fs, activeLiveBuffer);
+            inputTunerLive.setLatencySamples(liveLatencySamples);
+            for (int v = 0; v < kMaxVoices; ++v)
+                liveVoices[static_cast<size_t>(v)].setLatencySamples(liveLatencySamples);
+
             activeLatencySamples = (activeMode == EngineMode::Live) ? liveLatencySamples : studioLatencySamples;
 
             inputTunerLive.reset();

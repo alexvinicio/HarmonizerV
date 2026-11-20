@@ -7,7 +7,7 @@ if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 endif()
 
-project(HarmonizerV VERSION 2.1.0 LANGUAGES C CXX)
+project(HarmonizerV VERSION 2.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,6 +15,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(HARMONIZERV_BUILD_TESTS "Build Catch2 DSP unit tests" ON)
 option(HARMONIZERV_COPY_PLUGIN "Copy built VST3/AU to system plugin folder after build" OFF)
+option(HARMONIZERV_ENABLE_ASIO "Enable Steinberg ASIO support on Windows Standalone" ON)
 
 include(FetchContent)
 
@@ -52,6 +53,7 @@ add_library(HarmonizerV_DSP STATIC
     Source/Dsp/HarmonyBusFx.cpp
     Source/Dsp/MidiHarmonyController.h
     Source/Dsp/MidiHarmonyController.cpp
+    Source/Dsp/SnapshotBank.h
     Source/Dsp/HarmonizerEngine.h
     Source/Dsp/HarmonizerEngine.cpp
 )
@@ -98,6 +100,8 @@ juce_add_plugin(HarmonizerV
 
 target_sources(HarmonizerV PRIVATE
     Source/Plugin/ParameterIds.h
+    Source/Plugin/SnapshotManager.h
+    Source/Plugin/SnapshotManager.cpp
     Source/Plugin/PresetManager.h
     Source/Plugin/PresetManager.cpp
     Source/Plugin/PluginProcessor.h
@@ -127,6 +131,10 @@ target_compile_definitions(HarmonizerV PUBLIC
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
 )
+
+if(WIN32 AND HARMONIZERV_ENABLE_ASIO)
+    target_compile_definitions(HarmonizerV PUBLIC JUCE_ASIO=1)
+endif()
 
 target_link_libraries(HarmonizerV
     PRIVATE

@@ -32,7 +32,7 @@ std::vector<float> makeRichVocalWave(double f0Hz, double fs, int numSamples)
     return out;
 }
 
-std::vector<float> runTdPsola(const std::vector<float>& input, double fs, float shiftSt, float formantSt, int& outLatency, float naturalness = 0.35f)
+std::vector<float> runTdPsola(const std::vector<float>& input, double fs, float shiftSt, float formantSt, int& outLatency, float naturalness = 0.35f, harmonizer::dsp::LiveBufferSize bufSize = harmonizer::dsp::LiveBufferSize::Fast256)
 {
     harmonizer::dsp::PitchTracker tracker;
     harmonizer::dsp::PitchMarkDetector marks;
@@ -40,7 +40,7 @@ std::vector<float> runTdPsola(const std::vector<float>& input, double fs, float 
 
     tracker.prepare(fs);
     marks.prepare(fs);
-    voice.prepare(fs, 0);
+    voice.prepare(fs, 0, bufSize);
     outLatency = voice.getLatencySamples();
 
     std::vector<float> output(input.size(), 0.0f);
@@ -203,5 +203,50 @@ TEST_CASE("TdPsolaVoice band-split preserves stability with vibrato and breath",
     {
         REQUIRE(std::isfinite(s));
         REQUIRE(std::abs(s) < 2.0f);
+    }
+}
+
+TEST_CASE("TdPsolaVoice supports all LiveBufferSize latency options cleanly", "[TdPsolaVoice][LiveBuffer]")
+{
+    using harmonizer::dsp::LiveBufferSize;
+    const double fs = 48000.0;
+    const double f0 = 220.0;
+    const auto input = makeRichVocalWave(f0, fs, 28800);
+
+    struct BufferCase
+    {
+        LiveBufferSize size;
+        int expectedLatency;
+        double maxErrCents;
+    };
+
+    const BufferCase cases[] = {
+        { LiveBufferSize::Ultra128, 128, 40.0 },
+        { LiveBufferSize::Fast256,  256, 25.0 },
+        { LiveBufferSize::Low384,   384, 25.0 },
+        { LiveBufferSize::Safe512,  512, 25.0 },
+    };
+
+    const float shifts[] = { +4.0f, +7.0f, -5.0f, +12.0f, -12.0f };
+    for (const auto& bc : cases)
+    {
+        for (float st : shifts)
+        {
+            int latency = 0;
+            const auto out = runTdPsola(input, fs, st, 0.0f, latency, 0.35f, bc.size);
+            REQUIRE(latency == bc.expectedLatency);
+
+            for (float s : out)
+            {
+                REQUIRE(std::isfinite(s));
+                REQUIRE(std::abs(s) < 2.0f);
+            }
+
+            const double expectedHz = f0 * std::pow(2.0, st / 12.0);
+            const double measuredHz = findStrongestHarmonicPeakHz(out, 12000, 8192, fs, expectedHz);
+            const double errCents = 1200.0 * std::log2(measuredHz / expectedHz);
+            INFO("Buffer=" << bc.expectedLatency << " Shift=" << st << "st err=" << errCents << " cents");
+            REQUIRE(std::abs(errCents) <= bc.maxErrCents);
+        }
     }
 }

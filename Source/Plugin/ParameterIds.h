@@ -10,7 +10,9 @@ namespace harmonizer::params
 inline constexpr const char* key         = "key";
 inline constexpr const char* scale       = "scale";
 inline constexpr const char* engineMode  = "engine_mode";
+inline constexpr const char* liveBuffer  = "live_buffer";
 inline constexpr const char* harmonyMode = "harmony_mode";
+inline constexpr const char* snapshot    = "snapshot";
 inline constexpr const char* mix         = "mix";
 inline constexpr const char* outputGain  = "output_gain";
 inline constexpr const char* humanize    = "humanize";
